@@ -6,15 +6,15 @@
 
 struct line
 {
-    int      desired_algh;    /** Desired algorithm to draw.  */
+    int      desired_algh;    /** << Desired algorithm to draw. */
+    int      l_id;            /** << Line identifier.           */
+    int      was_cropped;     /** << If line was cropped.       */
 
-    int      l_id;            /** << Line identifier.         */
-    point_tt initial;         /** << Initial point.           */
-    point_tt final;           /** << Final point.             */
+    point_tt initial;         /** << Initial point.             */
+    point_tt final;           /** << Final point.               */
 
-    int      was_cropped;     /** << If line was cropped.     */
-    point_tt cropped_initial; /** << Cropped initial point.   */
-    point_tt cropped_final;   /** << Cropped final point.     */
+    point_tt cropped_initial; /** << Cropped initial point.     */
+    point_tt cropped_final;   /** << Cropped final point.       */
 };
 
 /**
@@ -27,6 +27,7 @@ static int next_l_id = 0;
  * 
  * @param initial Initial point of a line.
  * @param final   Final point of a line.
+ * @param algh    Desired algorithm to draw given line.
  * 
  * @returns A line.
 */
@@ -58,18 +59,25 @@ void line_destroy(struct line *l)
         point_destroy(l->cropped_initial);
         point_destroy(l->cropped_final);
     }
-    l->was_cropped = 0;
     point_destroy(l->initial);
     point_destroy(l->final);
-
 
     free(l);
 }
 
+/**
+ * @brief Adds new points to a line whenever it gets cropped.
+ * 
+ * @param l       Given line.
+ * @param initial Initial cropped point of a line.
+ * @param final   Final cropped point of a line.
+*/
 void line_add_cropped_points(struct line *l, struct point *c_i, struct point *c_f)
 {
     /* Sanity Check. */
     assert( l != NULL );
+    assert( c_i != NULL );
+    assert( c_f != NULL );
 
     l->was_cropped = 1;
     l->cropped_initial = c_i;
@@ -77,11 +85,62 @@ void line_add_cropped_points(struct line *l, struct point *c_i, struct point *c_
 }
 
 /**
- * @brief Returns line id.
+ * @brief Returns Line's original points.
+ * 
+ * @param l Desired Line.
+ * 
+ * @returns Line's original points. Initial = 1st index, Final = 2nd index.
+*/
+point_tt* line_get_points(const struct line *l)
+{
+    /* Sanity Check. */
+    assert( l != NULL );
+    struct point **points = (point_tt*) malloc(sizeof(point_tt) * 2);
+    points[0] = l->initial;
+    points[1] = l->final;
+
+    return (points);
+}
+
+/**
+ * @brief Returns Line's cropped points.
+ * 
+ * @param l Desired Line.
+ * 
+ * @returns Line's cropped points. Initial = 1st index, Final = 2nd index.
+*/
+point_tt* line_get_cropped_points(const struct line *l)
+{
+    /* Sanity Check. */
+    assert( l != NULL );
+    struct point **points = (point_tt*) malloc(sizeof(point_tt) * 2);
+    points[0] = l->cropped_initial;
+    points[1] = l->cropped_final;
+
+    return (points);
+}
+
+/**
+ * @brief Returns Line's drawing algh.
+ * 
+ * @param l Desired Line.
+ * 
+ * @returns Line's drawing algh. 1 = DDA, 2 = Bresenham.
+*/
+int line_get_algh(const struct line *l)
+{
+    /* Sanity Check. */
+    assert( l != NULL );
+
+    return (l->desired_algh);
+}
+
+/**
+ * @brief Returns line's id.
  * 
  * @param l Given line.
  * 
- * @returns Returns line id.
+ * @returns Returns line's id.
 */
 int line_id(const struct line *l)
 {

@@ -11,16 +11,38 @@
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
 
-#include "point.h"
 #include "array.h"
 #include "line.h"
+#include "point.h"
+#include "polygon.h"
 
-#define MAX_POINTS 10
+// #define MAX_POINTS 10
 
 static cairo_surface_t *surface = NULL;
-static GtkWidget *label = NULL;
 static int algh = 0;
 static int cropp = 0;
+
+/**
+ * @brief All Widgets from our interface.
+*/
+struct {
+    GtkWidget      *window, 
+                   *frame,
+                   *drawing_area, 
+                   *main_box,
+                   *frame_box,
+                   *option_box,
+                   *dropdown_transformations,
+                   *dropdown_algorithms,
+                   *dropdown_drawings,
+                   *dropdown_croppings,
+                   *main_input,
+                   *label;
+    GtkGesture     *drag, 
+                   *press;
+    GtkEntryBuffer *entry_buffer;
+} Widgets;
+
 
 /**
  * @brief Current clicked Points.
@@ -33,21 +55,32 @@ static array_tt arr_points;
 static array_tt arr_lines;
 
 /**
+ * @brief Current drawn Polygons.
+*/
+static array_tt arr_polygons;
+
+/**
  * @brief Removes all points drawn in canvas.
 */
-static void clear_surface(void)
+static void clear_surface(int flag)
 {
     cairo_t *cr = cairo_create(surface);
     cairo_set_source_rgb(cr, 1, 1, 1);
     cairo_paint(cr);
 
     cairo_destroy(cr);
+    gtk_label_set_label(GTK_LABEL(Widgets.label), "Debug informations here...");
 
-    // Recreating array that contains all points
-    array_destroy(arr_points);
-    arr_points = array_create(MAX_POINTS);
-    array_destroy(arr_lines);
-    arr_lines = array_create(MAX_POINTS);
+    if ( flag ) 
+    {
+        // Recreating array that contains all points
+        array_destroy(arr_points);
+        arr_points = array_create(MAX_POINTS);
+        array_destroy(arr_lines);
+        arr_lines = array_create(MAX_POINTS);
+        array_destroy(arr_polygons);
+        arr_polygons = array_create(MAX_POINTS);
+    }
 }
 
 /**
@@ -72,7 +105,7 @@ static void resize_cb(GtkWidget *widget,
 
 
 
-        clear_surface();
+        clear_surface(1);
     }
 }
 
@@ -137,13 +170,16 @@ void draw_text(GtkWidget *widget,
                cairo_t   *cr,
                point_tt   p)
 {
+    int center_x = 0,
+        center_y = 0; 
+    gtk_widget_get_size_request(Widgets.drawing_area, &center_x, &center_y);
     double x = point_x_coord(p),
            y = point_y_coord(p);
     char *result = create_string(x, y);
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
     cairo_set_font_size(cr, 12.0);
 
-    cairo_move_to(cr, x - 34, y + 15 );
+    cairo_move_to(cr, (x + (center_x/2)) - 34, ((center_y/2) - y ) + 15 );
     cairo_show_text(cr, result);
 
     gtk_widget_queue_draw(widget);
@@ -158,9 +194,12 @@ static void draw_brush(GtkWidget *area,
                        double     y,
                        double    *c)
 {
+    int center_x = 0,
+        center_y = 0; 
+    gtk_widget_get_size_request(Widgets.drawing_area, &center_x, &center_y);
     // g_print("%lf %lf\n", x, y);
     cairo_set_source_rgb(cr, c[0], c[1], c[2]);
-    cairo_rectangle(cr, x - 3, y - 3, 6, 6);
+    cairo_rectangle(cr, (x + (center_x/2))- 3, ((center_y/2) - y ) - 3, 6, 6);
     cairo_fill(cr);
     gtk_widget_queue_draw(area);
 }
@@ -177,8 +216,22 @@ static void draw(GtkGestureDrag *gesture,
                  double          y,
                  GtkWidget      *area)
 {
+    if ( array_get_curr_num(arr_points) == MAX_POINTS )
+    {
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You have reached maximum amount of Points.");
+        return;
+    }
+    g_print("1 X %f, Y %f\n", x, y);
+    // Redefining center point to be exactly the center of canvas. In canvas 0,0 is in the top-left corner.
+    int center_x = 0,
+        center_y = 0; 
+    gtk_widget_get_size_request(Widgets.drawing_area, &center_x, &center_y);
+    x = x - (double)(center_x / 2);
+    y = (double)(center_y / 2) - y;
     struct point *p = point_create(x, y);
     array_set(arr_points, array_get_curr_num(arr_points), p);
+
+    g_print(" X %f, Y %f\n", point_x_coord(p), point_y_coord(p));
 
     // If cropping algorithm is NOT selected, define point color to black, otherwise, red
     if ( !cropp ) point_define_color(p, 0.0, 0.0, 0.0);
@@ -296,7 +349,7 @@ static void clean(GtkGestureClick *gesture,
                   double           y,
                   GtkWidget        *area)
 {
-    clear_surface();
+    clear_surface(1);
     gtk_widget_queue_draw(area);
 }
 
@@ -307,6 +360,7 @@ static void close_window(void)
 {
     array_destroy(arr_points);
     array_destroy(arr_lines);
+    array_destroy(arr_polygons);
     if ( surface ) cairo_surface_destroy(surface);
 }
 
@@ -324,25 +378,101 @@ static void algorithms_execution(GtkDropDown *dropdown,
     algh = gtk_drop_down_get_selected(dropdown);
 }
 
+int number_taken_points()
+{
+    int num = 0;
+
+    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
+        if ( point_is_taken(array_get(arr_points, i)) ) num++;
+
+    return num;
+}
+
+/**
+ * @brief Creates and draws Polygons with previously specified Drawing Algorithm.
+ * 
+ * @param area Drawing Area.
+ * 
+ * @returns True if code was correctly executed, False otherwise.
+*/
+Bool Polygon(GtkWidget *area)
+{
+    // If no algorithm selected, "Error".
+    if ( algh == 0 )
+    {
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You must provide the drawing algorithm.");
+        return False;
+    }
+    int controller = number_taken_points(),
+        size_p = array_get_curr_num(arr_points),
+        iterator = 0;
+
+    struct point **points = (point_tt*) malloc(sizeof(point_tt) * (size_p - controller));
+    if ( (size_p - controller) >= 3 )
+    { 
+        // Adding all left points into polygon's structure.
+        while ( controller < size_p ) 
+        {
+            point_tt p = array_get(arr_points, controller++);
+            point_take(p);
+            points[iterator++] = p;
+        }
+
+        
+        struct polygon *polygon = polygon_create(points, iterator, algh);
+
+        array_set(arr_polygons, array_get_curr_num(arr_polygons), polygon);
+
+        for ( int i = 0; i < iterator - 1; i++ )
+        {
+            struct point *pInit = points[i];
+            struct point *pFinal = points[i + 1];
+
+            if ( algh == 1 ) DDA(pInit, pFinal, area);
+            else if ( algh == 2 ) Bresenham(pInit, pFinal, area);
+        }
+        // Closing Polygon
+        struct point *pInit = points[iterator - 1];
+        struct point *pFinal = points[0];
+
+        if ( algh == 1 ) DDA(pInit, pFinal, area);
+        else if ( algh == 2 ) Bresenham(pInit, pFinal, area);
+
+    }else
+    {   
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: There must be atleast 3 free points to draw a Polygon.");
+        return False;
+    }
+
+    return True;
+}
+
 /**
  * @brief Creates and draws Lines with previously specified Drawing Algorithm.
  * 
+ * @param area Drawing Area.
  * 
- * @param area Drawing Area
- * 
- * @returns True if code was correctly executed, False otherwise
+ * @returns True if code was correctly executed, False otherwise.
 */
 Bool Line(GtkWidget *area)
 {
     // If no algorithm selected, "Error".
     if ( algh == 0 )
     {
-        gtk_label_set_label(GTK_LABEL(label), "WARNING: You must provide the drawing algorithm.");
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You must provide the drawing algorithm.");
         return False;
     }
 
-    int controller = array_get_curr_num(arr_lines) * 2,
+    int controller = number_taken_points(),
         size_p = array_get_curr_num(arr_points);
+
+
+    if ( (size_p - controller) < 2 ) 
+    {
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: There must be atleast 2 free points to draw a Line.");
+        return False;
+    }
+
     while( controller < size_p )
     {
         /**
@@ -353,12 +483,18 @@ Bool Line(GtkWidget *area)
         {  
             struct point *pInit = array_get(arr_points, controller);
             struct point *pFinal = array_get(arr_points, controller + 1);
-            controller++;
+
+            if ( point_is_taken(pInit) ) continue;
+
             struct line *new_line = line_create(pInit, pFinal, algh);
             array_set(arr_lines, array_get_curr_num(arr_lines), new_line);
+            point_take(pInit);
+            point_take(pFinal);
+
             if ( algh == 1 ) DDA(pInit, pFinal, area);
             else if ( algh == 2 ) Bresenham(pInit, pFinal, area);
-        }
+            controller++;
+        } 
         controller++;
     }
     return True;
@@ -379,7 +515,7 @@ void write_execution_time(double t)
     strcpy(result, "Time Elapsed: ");
     strcat(result, template);
     strcat(result, "ms.\0");
-    gtk_label_set_label(GTK_LABEL(label), result);
+    gtk_label_set_label(GTK_LABEL(Widgets.label), result);
 }
 
 /**
@@ -394,20 +530,23 @@ static void drawings_execution(GtkDropDown *dropdown,
                                gpointer     user_data)
 {
     int dropdown_selected = gtk_drop_down_get_selected(dropdown);
+    clock_t t;
+    Bool cntrl = False;
 
     GtkWidget *drawing_area = GTK_WIDGET(user_data);
     g_print("Drawing: %d!\n", dropdown_selected);
     switch (dropdown_selected)
     {
         case 1:
-            clock_t t = clock();
-            Bool cntrl = Line(drawing_area);
+            t = clock();
+            cntrl = Line(drawing_area);
             t = clock() - t;
-            if ( cntrl )
-                write_execution_time(t);
+            if ( cntrl ) write_execution_time(t);
             break;
         case 2:
-            // Polygon();
+            t = clock();
+            cntrl = Polygon(drawing_area);
+            if ( cntrl ) write_execution_time(t);
             break;
         case 3:
             // Circumference();
@@ -419,45 +558,108 @@ static void drawings_execution(GtkDropDown *dropdown,
 
 }
 
+// TODO Isso vai pra Utils
 char* read_from_until(char *content,
                       char  stop,
                       int  *pos)
 {
     char *result = (char*) malloc(sizeof(char) * 100);
     int controller = 0;
-    while ( content[*pos] != stop )
+
+    while ( content[*pos] != stop  )
     {
         // Ensuring that only numbers will be in our template
         if ( (content[*pos] < '0' || content[*pos] > '9') && content[*pos] != '.' && content[*pos] != '-' && content[*pos] != '+')
         {
-            gtk_label_set_label(GTK_LABEL(label), "WARNING: Translation template is: '(X,Y)'. Please, reformulate your input.");
+            gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: Template found is invalid. Please, reformulate your input.");
             return NULL;
         }
+        g_print("%c cccc\n", content[*pos]);
         result[controller++] = content[(*pos)++];
     }
+
     result[controller] = '\0';
     return result;
 }
 
+// TODO Isso vai pra Utils ( Tá com erro, tem que arrumar, pro código agora não será utilizado )
+double my_strtod(char* content)
+{
+    double result = 0.0f;
+    int num_size = 0,
+        mantissa_size = 0,
+        iterator = 0,
+        positive = 1;
+
+    if ( content[iterator] == '-' ) { positive = 0; iterator++; } 
+    else if ( content[iterator] == '+') iterator++;
+
+    
+    while ( content[iterator++] != '.' )  
+    {
+        // Making sure that what is read is actually a number.
+        assert(content[iterator] > '0' && content[iterator] < '9');
+        num_size++;
+    }
+
+    while ( iterator != strlen(content) ) 
+    {
+        assert(content[iterator] > '0' && content[iterator] < '9');
+        mantissa_size++;
+    }
+
+    
+    for ( int i = 0; i < num_size ; i++ )
+    {
+        // Since we are sure that everything is a number, we can force a typecasting
+        int curr_value = ((int) content[i]) - '0';
+        double power = pow(10.0f, num_size - i - 1);
+        result += curr_value * power;
+    }
+
+    for ( int i = 0; i < mantissa_size; i++ )
+    {
+        // Since we are sure that everything is a number, we can force a typecasting
+        int curr_value = ((int) content[i]) - '0';
+        double power = pow(10.0f, i + 1);
+        result += curr_value / power;
+    }
+
+    if ( positive == 0 ) result *= -1;
+    return result;
+}
+
+/**
+ * @brief Checks if given content is correct based in given transformation algorithm's template (Check documentation).
+ * If values[pos] == -1, it implies that this position is not used.
+ *  
+ * @param content   Content to be analysed
+ * @param transf_id Which transformation was selected
+ * 
+ * @returns An array that contains the read values based on transformation algorithm's template (Check documentation). 
+*/
 double* check_content(char* content, 
                       int   transf_id)
 {
     char *first  = (char*) malloc(sizeof(char) * 100),
          *second = (char*) malloc(sizeof(char) * 100),
          *foo = (char*) malloc(sizeof(char) * 100);
-    int controller = 1;
+         
+    int controller = 0;
     double *values = (double*) malloc(sizeof(double) * 3);
-    // Translation. Should be informed as: (X,Y) - Where X and Y are the values that will be incremented to current points.
-    if ( transf_id == 1 )
+    // Translation and Scale. Should be informed as: '(X,Y)' - Where X and Y are, both, the integer values (pos or neg).
+    if ( transf_id == 1 || transf_id == 3)
     {
         if ( strlen(content) < 5 )
         {
-            gtk_label_set_label(GTK_LABEL(label), "WARNING: Translation template is: '(X,Y)'. Please, reformulate your input.");
+            if ( transf_id == 1 )
+                gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: Translation template is: '(INT,INT)'. Please, reformulate your input.");
+            else gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: Scale template is: '(INT,INT)'. Please, reformulate your input.");
             return NULL;
         }
         double x = 0.0f,
                y = 0.0f;
-
+        controller = 1;
         first = read_from_until(content, ',', &controller);
         if ( first == NULL ) return NULL;
 
@@ -472,7 +674,28 @@ double* check_content(char* content,
         values[1] = y;
         values[2] = -1;
         return values;
+    } 
+    // Rotation. Should be informed as: 'X' - Where X is an integer rotation degree value (pos or neg).
+    else if ( transf_id == 2 )
+    {
+        if ( strlen(content) > 4 )
+        {
+            gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: Rotation template is: 'INT'. Please, reformulate your input.");
+            return NULL;
+        }
+
+        double ang = 0.0f;
+        first = read_from_until(content, 'd', &controller);
+        if ( first == NULL ) return NULL;
+
+        ang = strtod(first, &foo);
+        g_print("Anb %f\n", ang);
+        values[0] = ang * M_PI / 180.0;
+        values[1] = -1;
+        values[2] = -1;
+        return values;
     }
+
 
     // House Keeping
     free(first);
@@ -480,20 +703,648 @@ double* check_content(char* content,
     free(foo);
 }
 
+Bool xyreflection()
+{
+    int aux[MAX_POINTS],
+        cont = 0;
+    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;
+
+    clear_surface(0);
+    gtk_widget_queue_draw(Widgets.drawing_area);
+    cairo_t *cr;
+    cr = cairo_create(surface);
+    for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
+    {
+        line_tt foo = array_get(arr_lines, i);
+
+        point_tt *points = line_get_points(foo);
+        int line_algh = line_get_algh(foo);
+
+        for ( int j = 0; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+            g_print("Antes %f %f\n",point_x_coord(points[j]), point_y_coord(points[j]));
+            double new_x = -point_x_coord(points[j]),
+                   new_y = point_y_coord(points[j]);
+            g_print("Depois %f %f\n", new_x, new_y);
+            point_set_coord(points[j], new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+
+        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
+        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
+    }
+
+        // Polygons
+    for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
+    {
+        polygon_tt foo = array_get(arr_polygons, i);
+
+        array_tt p_points = polygon_get_points(foo);
+        int line_algh = polygon_get_algh(foo);
+
+        for ( int j = 0; j < array_get_curr_num(p_points) ; j++ )
+        {   
+            struct point *p = array_get(p_points, j);
+            aux[cont++] = point_id(p);
+            double new_x = -point_x_coord(array_get(p_points, j)),
+                   new_y = -point_y_coord(array_get(p_points, j));
+            point_set_coord(p, new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+
+        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
+        {
+            struct point *pInit = array_get(p_points, j);
+            struct point *pFinal = array_get(p_points, j + 1);
+
+            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+        }
+        // Closing Polygon
+        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
+        struct point *pFinal = array_get(p_points, 0);
+
+        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+    }
+    // TODO Copy the same idea above, but for Poligons and Circumference.
+
+
+    // Drawing all points that aren't part of an object
+    Bool drawn = false;
+    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
+    {
+        drawn = false;
+        point_tt p = array_get(arr_points, i);
+        int id = point_id(p);
+
+        for ( int j = 0; j < MAX_POINTS; j++ )
+        {   
+            if ( id == aux[j] ) drawn = true;
+        }
+
+        if ( !drawn ) 
+        {
+            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+    }
+    cairo_destroy(cr);
+
+
+    return True;
+}
+
+Bool yreflection()
+{
+    int aux[MAX_POINTS],
+        cont = 0;
+    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;
+
+    clear_surface(0);
+    gtk_widget_queue_draw(Widgets.drawing_area);
+    cairo_t *cr;
+    cr = cairo_create(surface);
+    for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
+    {
+        line_tt foo = array_get(arr_lines, i);
+
+        point_tt *points = line_get_points(foo);
+        int line_algh = line_get_algh(foo);
+
+        for ( int j = 0; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+            double new_x = -point_x_coord(points[j]),
+                   new_y = point_y_coord(points[j]);
+            point_set_coord(points[j], new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+
+
+        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
+        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
+    }
+
+        // Polygons
+    for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
+    {
+        polygon_tt foo = array_get(arr_polygons, i);
+
+        array_tt p_points = polygon_get_points(foo);
+        int line_algh = polygon_get_algh(foo);
+
+        for ( int j = 0; j < array_get_curr_num(p_points) ; j++ )
+        {   
+            struct point *p = array_get(p_points, j);
+            aux[cont++] = point_id(p);
+            double new_x = -point_x_coord(array_get(p_points, j)),
+                   new_y = point_y_coord(array_get(p_points, j));
+            point_set_coord(p, new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+
+        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
+        {
+            struct point *pInit = array_get(p_points, j);
+            struct point *pFinal = array_get(p_points, j + 1);
+
+            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+        }
+        // Closing Polygon
+        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
+        struct point *pFinal = array_get(p_points, 0);
+
+        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+    }
+
+    // TODO Copy the same idea above, but for Poligons and Circumference.
+
+
+
+    // Drawing all points that aren't part of an object
+    Bool drawn = false;
+    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
+    {
+        drawn = false;
+        point_tt p = array_get(arr_points, i);
+        int id = point_id(p);
+
+        for ( int j = 0; j < MAX_POINTS; j++ )
+        {   
+            if ( id == aux[j] ) drawn = true;
+        }
+
+        if ( !drawn ) 
+        {
+            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+    }
+
+    cairo_destroy(cr);
+    return True;
+}
+
+Bool xreflection()
+{
+    int aux[MAX_POINTS],
+        cont = 0;
+    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;
+
+    clear_surface(0);
+    gtk_widget_queue_draw(Widgets.drawing_area);
+    cairo_t *cr;
+    cr = cairo_create(surface);
+    for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
+    {
+        
+        line_tt foo = array_get(arr_lines, i);
+
+        point_tt *points = line_get_points(foo);
+        int line_algh = line_get_algh(foo);
+
+        for ( int j = 0; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+            double new_x = point_x_coord(points[j]),
+                   new_y = -point_y_coord(points[j]);
+            point_set_coord(points[j], new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+
+
+        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
+        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
+    }
+
+    // Polygons
+    for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
+    {
+        polygon_tt foo = array_get(arr_polygons, i);
+
+        array_tt p_points = polygon_get_points(foo);
+        int line_algh = polygon_get_algh(foo);
+
+        for ( int j = 0; j < array_get_curr_num(p_points) ; j++ )
+        {   
+            struct point *p = array_get(p_points, j);
+            aux[cont++] = point_id(p);
+            double new_x = point_x_coord(array_get(p_points, j)),
+                   new_y = -point_y_coord(array_get(p_points, j));
+            point_set_coord(p, new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+
+        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
+        {
+            struct point *pInit = array_get(p_points, j);
+            struct point *pFinal = array_get(p_points, j + 1);
+
+            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+        }
+        // Closing Polygon
+        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
+        struct point *pFinal = array_get(p_points, 0);
+
+        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+    }
+
+    // TODO Copy the same idea above, but for Poligons and Circumference.
+
+    // Drawing all points that aren't part of an object
+    Bool drawn = false;
+    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
+    {
+        drawn = false;
+        point_tt p = array_get(arr_points, i);
+        int id = point_id(p);
+
+        for ( int j = 0; j < MAX_POINTS; j++ )
+        {   
+            if ( id == aux[j] ) drawn = true;
+        }
+
+        if ( !drawn ) 
+        {
+            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+    }
+    cairo_destroy(cr);
+    return True;
+}
+
+// TODO Acho que essa parada aqui tá errada... Mas num sei 
+Bool rotation(char *content,
+              int   transf_id)
+{
+    // Sanity Check
+    if ( strlen(content) == 0 ) 
+    {
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You must provide paramethers to this transformation.");
+        return False;
+    }
+    
+    double *rotation = NULL;
+    if ( (rotation = check_content(content, transf_id)) == NULL ) return False;
+    int aux[MAX_POINTS],
+        cont = 0;
+    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;   
+
+    // Pinning first point always
+    clear_surface(0);
+    gtk_widget_queue_draw(Widgets.drawing_area);
+    cairo_t *cr;
+    cr = cairo_create(surface);
+    g_print("%lf Rotation\n", rotation[0]);
+    for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
+    {
+        line_tt foo = array_get(arr_lines, i);
+
+        point_tt *points = line_get_points(foo);
+        int line_algh = line_get_algh(foo);
+
+        // TODO Probably this can be anexed in a new function (V)
+        double pinned_x = point_x_coord(points[0]),
+               pinned_y = point_y_coord(points[0]);
+        draw_brush(Widgets.drawing_area, cr, pinned_x, pinned_y, color_get_colors(point_color(points[0])));
+        draw_text(Widgets.drawing_area, cr, points[0]);
+        aux[cont++] = point_id(points[0]);
+
+        for ( int j = 1; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+            double new_x = ( (point_x_coord(points[j]) - pinned_x) * cos(rotation[0])) - ( (point_y_coord(points[j]) - pinned_y) * sin(rotation[0])),
+                   new_y = ( (point_x_coord(points[j]) - pinned_x) * sin(rotation[0])) + ( (point_y_coord(points[j]) - pinned_y) * cos(rotation[0]));
+            point_set_coord(points[j], new_x + pinned_x, new_y + pinned_y);
+            draw_brush(Widgets.drawing_area, cr, new_x + pinned_x, new_y + pinned_y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+        
+
+        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
+        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
+    }
+
+    // Polygons
+    for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
+    {
+        polygon_tt foo = array_get(arr_polygons, i);
+
+        array_tt p_points = polygon_get_points(foo);
+        int line_algh = polygon_get_algh(foo);
+
+        point_tt p_pinned = array_get(p_points, 0);
+        double pinned_x = point_x_coord(p_pinned),
+               pinned_y = point_y_coord(p_pinned);
+        draw_brush(Widgets.drawing_area, cr, pinned_x, pinned_y, color_get_colors(point_color(p_pinned)));
+        draw_text(Widgets.drawing_area, cr, p_pinned);
+        aux[cont++] = point_id(p_pinned);
+
+        for ( int j = 1; j < array_get_curr_num(p_points) ; j++ )
+        {   
+            struct point *p = array_get(p_points, j);
+            aux[cont++] = point_id(p);
+            double new_x = ( (point_x_coord(p) - pinned_x) * cos(rotation[0])) - ( (point_y_coord(p) - pinned_y) * sin(rotation[0])),
+                   new_y = ( (point_x_coord(p) - pinned_x) * sin(rotation[0])) + ( (point_y_coord(p) - pinned_y) * cos(rotation[0]));
+            point_set_coord(p, new_x + pinned_x, new_y + pinned_y);
+            draw_brush(Widgets.drawing_area, cr, new_x + pinned_x, new_y + pinned_y, color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+
+        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
+        {
+            struct point *pInit = array_get(p_points, j);
+            struct point *pFinal = array_get(p_points, j + 1);
+
+            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+        }
+        // Closing Polygon
+        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
+        struct point *pFinal = array_get(p_points, 0);
+
+        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+    }
+
+
+    // TODO Copy the same idea above, but for Poligons (Rotation in Circumference is useless).
+
+
+
+    // Drawing all points that aren't part of an object
+    Bool drawn = false;
+    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
+    {
+        drawn = false;
+        point_tt p = array_get(arr_points, i);
+        int id = point_id(p);
+
+        for ( int j = 0; j < MAX_POINTS; j++ )
+        {   
+            if ( id == aux[j] ) drawn = true;
+        }
+
+        if ( !drawn ) 
+        {
+            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+    }
+    g_print("%lf 22Rotation\n", rotation[0]);
+
+    cairo_destroy(cr);
+    return True;
+}
+
+Bool scale(char *content, 
+           int   transf_id)
+{
+    // Sanity Check
+    if ( strlen(content) == 0 ) 
+    {
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You must provide paramethers to this transformation.");
+        return False;
+    }
+
+    // When Scaling, whenever a value is negative, it means to SHRINK "the points". Positive values means to increase
+    double *scale = NULL;
+    if ( (scale = check_content(content, transf_id)) == NULL ) return False;
+
+    // Pinning first point always. If not Pinned, scale will also be a translation
+    int aux[MAX_POINTS],
+        cont = 0;
+    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;
+
+    clear_surface(0);
+    gtk_widget_queue_draw(Widgets.drawing_area);
+    cairo_t *cr;
+    cr = cairo_create(surface);
+
+    // Lines
+    for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
+    {
+        line_tt foo = array_get(arr_lines, i);
+        point_tt *points = line_get_points(foo);
+        int line_algh = line_get_algh(foo);
+
+        draw_brush(Widgets.drawing_area, cr, point_x_coord(points[0]), point_y_coord(points[0]), color_get_colors(point_color(points[0])));
+        draw_text(Widgets.drawing_area, cr, points[0]);
+        aux[cont++] = point_id(points[0]);
+
+        for ( int j = 1; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+
+            double new_x = point_x_coord(points[j]),
+                   new_y = point_y_coord(points[j]);
+            int line_algh = line_get_algh(foo);
+            if ( scale[0] < 0 ) new_x /= abs(scale[0]);
+            else new_x *= scale[0];
+            if ( scale[1] < 0 ) new_y /= abs(scale[1]);
+            else new_y *= scale[1]; 
+
+            point_set_coord(points[j], new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+        
+
+        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
+        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
+
+    }
+
+    // Polygons
+    for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
+    {
+        polygon_tt foo = array_get(arr_polygons, i);
+
+        array_tt p_points = polygon_get_points(foo);
+        int line_algh = polygon_get_algh(foo);
+
+        for ( int j = 0; j < array_get_curr_num(p_points) ; j++ )
+        {   
+            struct point *p = array_get(p_points, j);
+            aux[cont++] = point_id(p);
+            double new_x = point_x_coord(array_get(p_points, j)),
+                   new_y = point_y_coord(array_get(p_points, j));
+
+            if ( scale[0] < 0 ) new_x /= abs(scale[0]);
+            else new_x *= scale[0];
+            if ( scale[1] < 0 ) new_y /= abs(scale[1]);
+            else new_y *= scale[1]; 
+            point_set_coord(p, new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+
+        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
+        {
+            struct point *pInit = array_get(p_points, j);
+            struct point *pFinal = array_get(p_points, j + 1);
+
+            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+        }
+        // Closing Polygon
+        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
+        struct point *pFinal = array_get(p_points, 0);
+
+        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+    }
+
+
+    // TODO Copy the same idea above, but for Circumferences.
+
+    // Drawing all points that aren't part of an object
+    Bool drawn = false;
+    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
+    {
+        drawn = false;
+        point_tt p = array_get(arr_points, i);
+        int id = point_id(p);
+
+        for ( int j = 0; j < MAX_POINTS; j++ )
+        {   
+            if ( id == aux[j] ) drawn = true;
+        }
+
+        if ( !drawn ) 
+        {
+            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+    }
+
+    g_print("Scale: %f %f\n", scale[0], scale[1]);
+    cairo_destroy(cr);
+
+    free(scale);
+    return True;
+
+
+}
+
 Bool translation(char *content,
                  int   transf_id)
 {
+    // Sanity Check
     if ( strlen(content) == 0 ) 
     {
-        gtk_label_set_label(GTK_LABEL(label), "WARNING: You must provide paramethers to a transformation.");
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You must provide paramethers to this transformation.");
         return False;
     }
 
     double *translation = NULL;
     if ( (translation = check_content(content, transf_id)) == NULL ) return False;
 
+    int aux[MAX_POINTS],
+        cont = 0;
+    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;   
+    
+    clear_surface(0);
+    gtk_widget_queue_draw(Widgets.drawing_area);
+    cairo_t *cr;
+    cr = cairo_create(surface);
+    
+    // Lines
+    for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
+    {
+        line_tt foo = array_get(arr_lines, i);
+
+        point_tt *points = line_get_points(foo);
+        int line_algh = line_get_algh(foo);
+
+        // TODO Probably this can be anexed in a new function (V)
+        for ( int j = 0; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+            double new_x = point_x_coord(points[j]) + translation[0],
+                   new_y = point_y_coord(points[j]) + translation[1];
+            point_set_coord(points[j], new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+        
+
+        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
+        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
+    }
+
+    // Polygons
+    for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
+    {
+        polygon_tt foo = array_get(arr_polygons, i);
+
+        array_tt p_points = polygon_get_points(foo);
+        int line_algh = polygon_get_algh(foo);
+
+        for ( int j = 0; j < array_get_curr_num(p_points) ; j++ )
+        {   
+            struct point *p = array_get(p_points, j);
+            aux[cont++] = point_id(p);
+            double new_x = point_x_coord(p) + translation[0],
+                   new_y = point_y_coord(p) + translation[1];
+            point_set_coord(p, new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+
+        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
+        {
+            struct point *pInit = array_get(p_points, j);
+            struct point *pFinal = array_get(p_points, j + 1);
+
+            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+        }
+        // Closing Polygon
+        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
+        struct point *pFinal = array_get(p_points, 0);
+
+        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+    }
+
+    // TODO Copy the same idea above, but for Poligons (Rotation in Circumference is useless).
+
+    // Drawing all points that aren't part of an object
+    Bool drawn = false;
+    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
+    {
+        drawn = false;
+        point_tt p = array_get(arr_points, i);
+        int id = point_id(p);
+
+        for ( int j = 0; j < MAX_POINTS; j++ )
+        {   
+            if ( id == aux[j] ) drawn = true;
+        }
+
+        if ( !drawn ) 
+        {
+            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+    }
     g_print("Translation: %f %f\n", translation[0], translation[1]);
 
+    // free(points);
     free(translation);
     return True;
 }
@@ -511,33 +1362,59 @@ static void transformation_execution(GtkDropDown *dropdown,
 {
     // Getting the content written into the entry. It's allocated in a reserved buffer
     char *content = g_strdup(gtk_entry_buffer_get_text(user_data));
-
-
     int dropdown_selected = gtk_drop_down_get_selected(dropdown);
+    clock_t t;
+    Bool cntrl;
+
+    g_print("Size: %d\n", array_get_curr_num(arr_points));
+    if ( dropdown_selected != 0 && array_get_curr_num(arr_points) == 0 )
+    {
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You must draw points to perform transformations.");
+        return;
+        // TODO Adicionar na verificação a baixo caso o array de circunferencia e poligonos também esteja vazio.
+    } else if ( dropdown_selected != 0 && array_get_curr_num(arr_lines) == 0 && array_get_curr_num(arr_polygons) == 0 )
+    {
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You must draw an object to perform transformations.");
+        return;
+    }
 
     switch (dropdown_selected)
     {
         case 1:
-            clock_t t = clock();
-            Bool cntrl = translation(content, dropdown_selected);
+            t = clock();
+            cntrl = translation(content, dropdown_selected);
             t = clock() - t;
-            if ( cntrl )
-                write_execution_time(t);
+            if ( cntrl ) write_execution_time(t);
             break;
         case 2:
-            // rotation(content);
+            t = clock();
+            cntrl = rotation(content, dropdown_selected);
+            t = clock() - t;
+            if ( cntrl ) write_execution_time(t);
             break;
         case 3:
-            // scale(content);
+            t = clock();
+            cntrl = scale(content, dropdown_selected);
+            t = clock() - t;
+            if ( cntrl ) write_execution_time(t);
             break;
         case 4:
-            // xreflection();
+            t = clock();
+            cntrl = xreflection();
+            t = clock() - t;
+            if ( cntrl ) write_execution_time(t);
             break;
         case 5: 
-            // yreflection();
+            t = clock();
+            cntrl = yreflection();
+            t = clock() - t;
+            if ( cntrl ) write_execution_time(t);
             break;
         case 6:
-            // xyreflection();
+            t = clock();
+            cntrl = xyreflection();
+            t = clock() - t;
+            if ( cntrl ) write_execution_time(t);
             break;
         default:
             break;
@@ -592,24 +1469,8 @@ void user_monitor_info(int *width, int *height)
 static void activate(GtkApplication *app, 
                      gpointer        user_data)
 {
-    GtkWidget      *window, 
-                   *frame,
-                   *drawing_area, 
-                   *main_box,
-                   *frame_box,
-                   *option_box,
-                   *dropdown_transformations,
-                   *dropdown_algorithms,
-                   *dropdown_drawings,
-                   *dropdown_croppings,
-                   *main_input;
-    GtkGesture     *drag, 
-                   *press;
-    GtkEntryBuffer *entry_buffer;
-
-
-    const char *dropdown_content_algorithms[4] = {"Line Algorithms\0", "DDA\0", "Bresenham\0"};
-    const char *dropdown_content_drawings[5] = {"Draw\0", "Line\0", "Polygon\0", "Circumference\0"};
+    const char *dropdown_content_algorithms[4] = {"Drawing Algorithms\0", "DDA\0", "Bresenham\0"};
+    const char *dropdown_content_drawings[5] = {"Objects\0", "Line\0", "Polygon\0", "Circumference\0"};
     const char *dropdown_content_transformations[8] = {"Geometric Transformations\0", "Translate\0", "Rotate\0", "Scale\0", "X Reflection\0", "Y Reflection\0", "XY Reflection\0"};
     const char *dropdown_content_croppings[4] = {"Cropping Algorithms\0", "Cohen-Sutherland\0", "Liang-Barsky\0"};
 
@@ -618,69 +1479,69 @@ static void activate(GtkApplication *app,
 
     user_monitor_info(&width, &height);
 
-    window = gtk_application_window_new(app);
-    gtk_window_set_title(GTK_WINDOW(window), "GC Project");
+    Widgets.window = gtk_application_window_new(app);
+    gtk_window_set_title(GTK_WINDOW(Widgets.window), "GC Project");
 
-    g_signal_connect(window, "destroy", G_CALLBACK(close_window), NULL);
+    g_signal_connect(Widgets.window, "destroy", G_CALLBACK(close_window), NULL);
 
     
-    main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_window_set_child(GTK_WINDOW(window), main_box);
+    Widgets.main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_window_set_child(GTK_WINDOW(Widgets.window), Widgets.main_box);
 
-    frame_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append(GTK_BOX(main_box), frame_box);
+    Widgets.frame_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append(GTK_BOX(Widgets.main_box), Widgets.frame_box);
 
-    frame = gtk_frame_new(NULL);
-    gtk_box_append(GTK_BOX(frame_box), frame);
+    Widgets.frame = gtk_frame_new(NULL);
+    gtk_box_append(GTK_BOX(Widgets.frame_box), Widgets.frame);
 
-    drawing_area = gtk_drawing_area_new();
-    gtk_widget_set_size_request(drawing_area, width, ((height * 91) / 100));
-    gtk_frame_set_child(GTK_FRAME(frame), drawing_area);
+    Widgets.drawing_area = gtk_drawing_area_new();
+    gtk_widget_set_size_request(Widgets.drawing_area, width, ((height * 91) / 100));
+    gtk_frame_set_child(GTK_FRAME(Widgets.frame), Widgets.drawing_area);
 
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(drawing_area), draw_cb, NULL, NULL);
-    g_signal_connect_after(drawing_area, "resize", G_CALLBACK(resize_cb), NULL);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(Widgets.drawing_area), draw_cb, NULL, NULL);
+    g_signal_connect_after(Widgets.drawing_area, "resize", G_CALLBACK(resize_cb), NULL);
 
-    drag = gtk_gesture_drag_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(drag), GDK_BUTTON_PRIMARY);
-    gtk_widget_add_controller(drawing_area, GTK_EVENT_CONTROLLER(drag));
-    g_signal_connect(drag, "drag-begin", G_CALLBACK(draw), drawing_area); 
+    Widgets.drag = gtk_gesture_drag_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(Widgets.drag), GDK_BUTTON_PRIMARY);
+    gtk_widget_add_controller(Widgets.drawing_area, GTK_EVENT_CONTROLLER(Widgets.drag));
+    g_signal_connect(Widgets.drag, "drag-begin", G_CALLBACK(draw), Widgets.drawing_area); 
 
-    press = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(press), GDK_BUTTON_SECONDARY);
-    gtk_widget_add_controller(drawing_area, GTK_EVENT_CONTROLLER(press));
+    Widgets.press = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(Widgets.press), GDK_BUTTON_SECONDARY);
+    gtk_widget_add_controller(Widgets.drawing_area, GTK_EVENT_CONTROLLER(Widgets.press));
 
-    g_signal_connect(press, "pressed", G_CALLBACK(clean), drawing_area);
+    g_signal_connect(Widgets.press, "pressed", G_CALLBACK(clean), Widgets.drawing_area);
     
-    option_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_box_append(GTK_BOX(main_box), option_box);
-    gtk_box_set_spacing(GTK_BOX(option_box), 5);
+    Widgets.option_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_box_append(GTK_BOX(Widgets.main_box), Widgets.option_box);
+    gtk_box_set_spacing(GTK_BOX(Widgets.option_box), 5);
 
-    dropdown_algorithms = gtk_drop_down_new_from_strings(dropdown_content_algorithms);
-    gtk_box_append(GTK_BOX(option_box), dropdown_algorithms);
+    Widgets.dropdown_algorithms = gtk_drop_down_new_from_strings(dropdown_content_algorithms);
+    gtk_box_append(GTK_BOX(Widgets.option_box), Widgets.dropdown_algorithms);
 
-    dropdown_drawings = gtk_drop_down_new_from_strings(dropdown_content_drawings);
-    gtk_box_append(GTK_BOX(option_box), dropdown_drawings);
+    Widgets.dropdown_drawings = gtk_drop_down_new_from_strings(dropdown_content_drawings);
+    gtk_box_append(GTK_BOX(Widgets.option_box), Widgets.dropdown_drawings);
 
-    dropdown_transformations = gtk_drop_down_new_from_strings(dropdown_content_transformations);
-    gtk_box_append(GTK_BOX(option_box), dropdown_transformations);
+    Widgets.dropdown_transformations = gtk_drop_down_new_from_strings(dropdown_content_transformations);
+    gtk_box_append(GTK_BOX(Widgets.option_box), Widgets.dropdown_transformations);
  
-    dropdown_croppings = gtk_drop_down_new_from_strings(dropdown_content_croppings);
-    gtk_box_append(GTK_BOX(option_box), dropdown_croppings);
+    Widgets.dropdown_croppings = gtk_drop_down_new_from_strings(dropdown_content_croppings);
+    gtk_box_append(GTK_BOX(Widgets.option_box), Widgets.dropdown_croppings);
 
-    entry_buffer = gtk_entry_buffer_new(NULL, -1);
-    main_input = gtk_entry_new_with_buffer(entry_buffer);
-    gtk_entry_set_placeholder_text(GTK_ENTRY(main_input), "Transformation values here...");
-    gtk_box_append(GTK_BOX(option_box), main_input);
+    Widgets.entry_buffer = gtk_entry_buffer_new(NULL, -1);
+    Widgets.main_input = gtk_entry_new_with_buffer(Widgets.entry_buffer);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(Widgets.main_input), "Transformation values here...");
+    gtk_box_append(GTK_BOX(Widgets.option_box), Widgets.main_input);
 
     /*https://stackoverflow.com/questions/73334375/how-to-pass-2-or-more-gtk-widget-to-callback-function*/
-    label = gtk_label_new("Debug informations here...");
-    gtk_box_append(GTK_BOX(option_box), label);
+    Widgets.label = gtk_label_new("Debug informations here...");
+    gtk_box_append(GTK_BOX(Widgets.option_box), Widgets.label);
 
-    g_signal_connect(dropdown_algorithms, "notify::selected", G_CALLBACK(algorithms_execution), NULL);
-    g_signal_connect(dropdown_drawings, "notify::selected", G_CALLBACK(drawings_execution), GTK_DRAWING_AREA(drawing_area));
-    g_signal_connect(dropdown_transformations, "notify::selected", G_CALLBACK(transformation_execution), entry_buffer);
-    g_signal_connect(dropdown_croppings, "notify::selected", G_CALLBACK(cropping_selection), NULL);
-    gtk_window_present(GTK_WINDOW(window));
+    g_signal_connect(Widgets.dropdown_algorithms, "notify::selected", G_CALLBACK(algorithms_execution), NULL);
+    g_signal_connect(Widgets.dropdown_drawings, "notify::selected", G_CALLBACK(drawings_execution), GTK_DRAWING_AREA(Widgets.drawing_area));
+    g_signal_connect(Widgets.dropdown_transformations, "notify::selected", G_CALLBACK(transformation_execution), Widgets.entry_buffer);
+    g_signal_connect(Widgets.dropdown_croppings, "notify::selected", G_CALLBACK(cropping_selection), NULL);
+    gtk_window_present(GTK_WINDOW(Widgets.window));
 
 }
 
@@ -691,6 +1552,7 @@ int main(int    argc,
     int status;
     arr_points = array_create(MAX_POINTS);
     arr_lines = array_create(MAX_POINTS);
+    arr_polygons = array_create(MAX_POINTS);
 
     app = gtk_application_new("GC.Thiago", G_APPLICATION_FLAGS_NONE);
     g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);

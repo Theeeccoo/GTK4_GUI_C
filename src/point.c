@@ -7,10 +7,11 @@
 
 struct point
 {
-    int      p_id;    /** << Point identifier.              */
-    double   coord_x; /** << X coordinate of drawn point.   */
-    double   coord_y; /** << Y coordinate of drawn point.   */
-    color_tt pcolor;  /** << Desired color for given Point. */  
+    int      p_id;    /** << Point identifier.                        */
+    int      taken;   /** << If point is already taken by any object. */
+    double   coord_x; /** << X coordinate of drawn point.             */
+    double   coord_y; /** << Y coordinate of drawn point.             */
+    color_tt pcolor;  /** << Desired color for given Point.           */  
 };
 
 /**
@@ -29,18 +30,12 @@ static int next_p_id = 0;
 point_tt point_create(double x,
                       double y)
 {
-
     struct point *p = (struct point*) malloc(sizeof(struct point));
     p->p_id = next_p_id++;
+    p->taken = 0;
     p->coord_x = x;
     p->coord_y = y;
     p->pcolor = NULL;
-
-    // // TODO This initial value might be wrong if we change the 0,0 to be in the exact middle of canvas
-    // for ( int i = 0; i < MAX_POINTS; i++ )
-    // {
-    //     points.coordx[i] = points.coordy[i] = -1;
-    // }
 
     return (p);
 }
@@ -121,6 +116,34 @@ int point_id(const struct point *p)
     assert( p != NULL );
 
     return (p->p_id);
+}
+
+/**
+ * @brief Sets a point as taken by an object.
+ * 
+ * @param p Given point.
+*/
+void point_take(struct point *p)
+{
+    /* Sanity Check. */
+    assert( p != NULL );
+
+    p->taken = 1;
+}
+
+/**
+ * @brief Returns if given point is already taken by any object.
+ * 
+ * @param p Given point.
+ * 
+ * @returns If given point is already taken. 0 = No, 1 = Yes.
+*/
+int point_is_taken(const struct point *p)
+{
+    /* Sanity Check. */
+    assert( p != NULL );
+
+    return (p->taken);
 }
 
 /**

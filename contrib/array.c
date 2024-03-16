@@ -95,7 +95,7 @@ void array_set(struct array *a, int idx, void *obj)
 	assert((idx >= 0) && (idx < a->size));
 	assert(obj != NULL);
 
-    a->curr_num++;
+    if ( idx >= a->curr_num ) a->curr_num++;
 	a->elements[idx] = obj;
 }
 

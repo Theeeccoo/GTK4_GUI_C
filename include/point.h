@@ -24,6 +24,8 @@
     extern void     point_set_coord(point_tt, double, double);
     extern int      point_id(const_point_tt);
 
+    extern void     point_take(point_tt);
+    extern int      point_is_taken(const_point_tt);
     extern void     point_define_color(point_tt, double, double, double);
     extern color_tt point_color(const_point_tt);
     /**@)*/
