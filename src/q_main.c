@@ -643,6 +643,159 @@ void write_execution_time(double t)
     gtk_label_set_label(GTK_LABEL(Widgets.label), result);
 }
 
+void redraw_objects(GtkWidget *area)
+{   
+    int aux[MAX_POINTS],
+        cont = 0;
+    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;
+
+    clear_surface(0);
+    gtk_widget_queue_draw(Widgets.drawing_area);
+    cairo_t *cr;
+    cr = cairo_create(surface);
+    point_tt *points,
+             *oposite;
+
+    // Lines 
+    for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )    
+    {
+        struct line *line = array_get(arr_lines, i);
+        int line_algh = line_get_algh(line);
+        
+        // TODO talvez tenha que adicionar uma outra opção pra caso o objeto não esteja dentro do recorte, ai nem desenha ele
+        if ( !line_was_clipped(line) ) 
+        {
+            points = line_get_points(line);
+
+            // Preventing errors
+            oposite = line_get_clipped_points(line);
+            for ( int j = 0; j < 2; j++ )
+                if ( oposite[j] != NULL ) aux[cont++] = point_id(oposite[j]);
+        }
+        else
+        {
+            points = line_get_clipped_points(line);
+
+            // Preventing errors
+            oposite = line_get_points(line);
+            for ( int j = 0; j < 2; j++ )
+                if ( oposite[j] != NULL ) aux[cont++] = point_id(oposite[j]);
+        }
+
+        // Redrawing points
+        for ( int j = 0; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+            double x = point_x_coord(points[j]),
+                    y = point_y_coord(points[j]);
+            draw_brush(Widgets.drawing_area, cr, x, y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+
+        // Redrawing lines between points
+        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
+        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
+
+    }
+     
+    // Polygons
+    for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
+    {
+        struct polygon *pl = array_get(arr_polygons, i);
+        int polygon_algh = polygon_get_algh(pl);
+        array_tt p_points;
+        array_tt p_oposite;
+
+        if ( !polygon_was_clipped(pl) ) 
+        {
+            p_points = polygon_get_points(pl);
+
+            // Preventing errors
+            p_oposite = polygon_get_clipped_points(pl);
+            for ( int j = 0; j < array_get_curr_num(p_oposite); j++ )
+                if ( array_get(p_oposite, j) != NULL ) aux[cont++] = point_id(array_get(p_oposite, j));
+        }
+        else
+        {
+            p_points = polygon_get_clipped_points(pl);
+
+            // Preventing errors
+            p_oposite = polygon_get_points(pl);
+            for ( int j = 0; j < array_get_curr_num(p_oposite); j++ )
+                if ( array_get(p_oposite, j) != NULL ) aux[cont++] = point_id(array_get(p_oposite, j));
+        }
+
+        // Redrawing points
+        for ( int j = 0; j < array_get_curr_num(p_points) ; j++ )
+        {   
+            struct point *p = array_get(p_points, j);
+            aux[cont++] = point_id(p);
+            double x = point_x_coord(array_get(p_points, j)),
+                    y = point_y_coord(array_get(p_points, j));
+            draw_brush(Widgets.drawing_area, cr, x, y, color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+
+        // Redrawing lines between points
+        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
+        {
+            struct point *pInit = array_get(p_points, j);
+            struct point *pFinal = array_get(p_points, j + 1);
+
+            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+        }
+        // Closing Polygon
+        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
+        struct point *pFinal = array_get(p_points, 0);
+
+        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
+        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
+    }
+
+    // Circumference
+    for ( int i = 0; i < array_get_curr_num(arr_circumferences); i++ )
+    {
+        circumference_tt circumference = array_get(arr_circumferences, i);
+
+        points = circumference_get_points(circumference);
+
+        for ( int j = 0; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+            double x = point_x_coord(points[j]),
+                    y = point_y_coord(points[j]);
+            point_set_coord(points[j], x, y);
+            draw_brush(Widgets.drawing_area, cr, x, y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+
+        calculate_circumference_points(Widgets.drawing_area, circumference);
+    }
+
+    // Points
+    // Drawing all points that aren't part of an object
+    Bool drawn = false;
+    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
+    {
+        drawn = false;
+        point_tt p = array_get(arr_points, i);
+        int id = point_id(p);
+
+        for ( int j = 0; j < MAX_POINTS; j++ )
+        {   
+            if ( id == aux[j] ) drawn = true;
+        }
+
+        if ( !drawn ) 
+        {
+            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+    }   
+    cairo_destroy(cr);
+}
+
 /**
  * @brief (CALL_BACK) Function called whenever an option in "Drawing"drop-down is sellected, 
  * Defines which option of drawing (Line, Polygon or Circumfere) should be drawn.
@@ -833,35 +986,19 @@ double* check_content(char* content,
 
 Bool xyreflection()
 {
-    int aux[MAX_POINTS],
-        cont = 0;
-    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;
-
-    clear_surface(0);
-    gtk_widget_queue_draw(Widgets.drawing_area);
-    cairo_t *cr;
-    cr = cairo_create(surface);
-
     // Lines.
     for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
     {
         line_tt foo = array_get(arr_lines, i);
 
         point_tt *points = line_get_points(foo);
-        int line_algh = line_get_algh(foo);
 
         for ( int j = 0; j < 2; j++ )
         {
-            aux[cont++] = point_id(points[j]);
             double new_x = -point_x_coord(points[j]),
                    new_y = point_y_coord(points[j]);
             point_set_coord(points[j], new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
-            draw_text(Widgets.drawing_area, cr, points[j]);
         }
-
-        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
-        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
     }
 
     // Polygons.
@@ -870,33 +1007,14 @@ Bool xyreflection()
         polygon_tt foo = array_get(arr_polygons, i);
 
         array_tt p_points = polygon_get_points(foo);
-        int line_algh = polygon_get_algh(foo);
 
         for ( int j = 0; j < array_get_curr_num(p_points) ; j++ )
         {   
             struct point *p = array_get(p_points, j);
-            aux[cont++] = point_id(p);
             double new_x = -point_x_coord(array_get(p_points, j)),
                    new_y = -point_y_coord(array_get(p_points, j));
             point_set_coord(p, new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(p)));
-            draw_text(Widgets.drawing_area, cr, p);
         }
-
-        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
-        {
-            struct point *pInit = array_get(p_points, j);
-            struct point *pFinal = array_get(p_points, j + 1);
-
-            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
-            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
-        }
-        // Closing Polygon
-        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
-        struct point *pFinal = array_get(p_points, 0);
-
-        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
-        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
     }
     
     // Circumference.
@@ -908,74 +1026,31 @@ Bool xyreflection()
 
         for ( int j = 0; j < 2; j++ )
         {
-            aux[cont++] = point_id(points[j]);
             double new_x = -point_x_coord(points[j]),
                    new_y = -point_y_coord(points[j]);
             point_set_coord(points[j], new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
-            draw_text(Widgets.drawing_area, cr, points[j]);
-        }
-
-        calculate_circumference_points(Widgets.drawing_area, foo);
-    }
-
-    // Drawing all points that aren't part of an object
-    Bool drawn = false;
-    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
-    {
-        drawn = false;
-        point_tt p = array_get(arr_points, i);
-        int id = point_id(p);
-
-        for ( int j = 0; j < MAX_POINTS; j++ )
-        {   
-            if ( id == aux[j] ) drawn = true;
-        }
-
-        if ( !drawn ) 
-        {
-            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
-            draw_text(Widgets.drawing_area, cr, p);
         }
     }
-    cairo_destroy(cr);
 
-
+    redraw_objects(Widgets.drawing_area);
     return True;
 }
 
 Bool yreflection()
 {
-    int aux[MAX_POINTS],
-        cont = 0;
-    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;
-
-    clear_surface(0);
-    gtk_widget_queue_draw(Widgets.drawing_area);
-    cairo_t *cr;
-    cr = cairo_create(surface);
-    
     // Lines.
     for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
     {
         line_tt foo = array_get(arr_lines, i);
 
         point_tt *points = line_get_points(foo);
-        int line_algh = line_get_algh(foo);
 
         for ( int j = 0; j < 2; j++ )
         {
-            aux[cont++] = point_id(points[j]);
             double new_x = -point_x_coord(points[j]),
                    new_y = point_y_coord(points[j]);
             point_set_coord(points[j], new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
-            draw_text(Widgets.drawing_area, cr, points[j]);
         }
-
-
-        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
-        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
     }
 
     // Polygons.
@@ -984,33 +1059,14 @@ Bool yreflection()
         polygon_tt foo = array_get(arr_polygons, i);
 
         array_tt p_points = polygon_get_points(foo);
-        int line_algh = polygon_get_algh(foo);
 
         for ( int j = 0; j < array_get_curr_num(p_points) ; j++ )
         {   
             struct point *p = array_get(p_points, j);
-            aux[cont++] = point_id(p);
             double new_x = -point_x_coord(array_get(p_points, j)),
                    new_y = point_y_coord(array_get(p_points, j));
-            point_set_coord(p, new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(p)));
-            draw_text(Widgets.drawing_area, cr, p);
+            point_set_coord(p, new_x, new_y);;
         }
-
-        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
-        {
-            struct point *pInit = array_get(p_points, j);
-            struct point *pFinal = array_get(p_points, j + 1);
-
-            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
-            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
-        }
-        // Closing Polygon
-        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
-        struct point *pFinal = array_get(p_points, 0);
-
-        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
-        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
     }
 
     // Circumference.
@@ -1022,53 +1078,17 @@ Bool yreflection()
 
         for ( int j = 0; j < 2; j++ )
         {
-            aux[cont++] = point_id(points[j]);
             double new_x = -point_x_coord(points[j]),
                    new_y = point_y_coord(points[j]);
             point_set_coord(points[j], new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
-            draw_text(Widgets.drawing_area, cr, points[j]);
-        }
-
-        calculate_circumference_points(Widgets.drawing_area, foo);
-    }
-
-
-    // Drawing all points that aren't part of an object
-    Bool drawn = false;
-    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
-    {
-        drawn = false;
-        point_tt p = array_get(arr_points, i);
-        int id = point_id(p);
-
-        for ( int j = 0; j < MAX_POINTS; j++ )
-        {   
-            if ( id == aux[j] ) drawn = true;
-        }
-
-        if ( !drawn ) 
-        {
-            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
-            draw_text(Widgets.drawing_area, cr, p);
         }
     }
-
-    cairo_destroy(cr);
+    redraw_objects(Widgets.drawing_area);
     return True;
 }
 
 Bool xreflection()
-{
-    int aux[MAX_POINTS],
-        cont = 0;
-    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;
-
-    clear_surface(0);
-    gtk_widget_queue_draw(Widgets.drawing_area);
-    cairo_t *cr;
-    cr = cairo_create(surface);
-    
+{    
     // Lines.
     for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
     {
@@ -1076,21 +1096,13 @@ Bool xreflection()
         line_tt foo = array_get(arr_lines, i);
 
         point_tt *points = line_get_points(foo);
-        int line_algh = line_get_algh(foo);
 
         for ( int j = 0; j < 2; j++ )
         {
-            aux[cont++] = point_id(points[j]);
             double new_x = point_x_coord(points[j]),
                    new_y = -point_y_coord(points[j]);
             point_set_coord(points[j], new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
-            draw_text(Widgets.drawing_area, cr, points[j]);
         }
-
-
-        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
-        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
     }
 
     // Polygons
@@ -1099,33 +1111,14 @@ Bool xreflection()
         polygon_tt foo = array_get(arr_polygons, i);
 
         array_tt p_points = polygon_get_points(foo);
-        int line_algh = polygon_get_algh(foo);
 
         for ( int j = 0; j < array_get_curr_num(p_points) ; j++ )
         {   
             struct point *p = array_get(p_points, j);
-            aux[cont++] = point_id(p);
             double new_x = point_x_coord(array_get(p_points, j)),
                    new_y = -point_y_coord(array_get(p_points, j));
             point_set_coord(p, new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(p)));
-            draw_text(Widgets.drawing_area, cr, p);
         }
-
-        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
-        {
-            struct point *pInit = array_get(p_points, j);
-            struct point *pFinal = array_get(p_points, j + 1);
-
-            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
-            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
-        }
-        // Closing Polygon
-        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
-        struct point *pFinal = array_get(p_points, 0);
-
-        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
-        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
     }
 
     // Circumference.
@@ -1137,37 +1130,13 @@ Bool xreflection()
 
         for ( int j = 0; j < 2; j++ )
         {
-            aux[cont++] = point_id(points[j]);
             double new_x = point_x_coord(points[j]),
                    new_y = -point_y_coord(points[j]);
             point_set_coord(points[j], new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
-            draw_text(Widgets.drawing_area, cr, points[j]);
-        }
-
-        calculate_circumference_points(Widgets.drawing_area, foo);
-    }
-
-    // Drawing all points that aren't part of an object
-    Bool drawn = false;
-    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
-    {
-        drawn = false;
-        point_tt p = array_get(arr_points, i);
-        int id = point_id(p);
-
-        for ( int j = 0; j < MAX_POINTS; j++ )
-        {   
-            if ( id == aux[j] ) drawn = true;
-        }
-
-        if ( !drawn ) 
-        {
-            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
-            draw_text(Widgets.drawing_area, cr, p);
         }
     }
-    cairo_destroy(cr);
+
+    redraw_objects(Widgets.drawing_area);
     return True;
 }
 
@@ -1183,45 +1152,26 @@ Bool rotation(char *content,
     
     double *rotation = NULL;
     if ( (rotation = check_content(content, transf_id)) == NULL ) return False;
-    int aux[MAX_POINTS],
-        cont = 0;
-    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;   
 
     // Pinning first point always
-    clear_surface(0);
-    gtk_widget_queue_draw(Widgets.drawing_area);
-    cairo_t *cr;
-    cr = cairo_create(surface);
-    g_print("%lf Rotation\n", rotation[0]);
-
     // Lines.
     for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
     {
         line_tt foo = array_get(arr_lines, i);
 
         point_tt *points = line_get_points(foo);
-        int line_algh = line_get_algh(foo);
 
         // TODO Probably this can be anexed in a new function (V)
         double pinned_x = point_x_coord(points[0]),
                pinned_y = point_y_coord(points[0]);
-        draw_brush(Widgets.drawing_area, cr, pinned_x, pinned_y, color_get_colors(point_color(points[0])));
-        draw_text(Widgets.drawing_area, cr, points[0]);
-        aux[cont++] = point_id(points[0]);
 
         for ( int j = 1; j < 2; j++ )
         {
-            aux[cont++] = point_id(points[j]);
             double new_x = ( (point_x_coord(points[j]) - pinned_x) * cos(rotation[0])) - ( (point_y_coord(points[j]) - pinned_y) * sin(rotation[0])),
                    new_y = ( (point_x_coord(points[j]) - pinned_x) * sin(rotation[0])) + ( (point_y_coord(points[j]) - pinned_y) * cos(rotation[0]));
             point_set_coord(points[j], new_x + pinned_x, new_y + pinned_y);
-            draw_brush(Widgets.drawing_area, cr, new_x + pinned_x, new_y + pinned_y, color_get_colors(point_color(points[j])));
-            draw_text(Widgets.drawing_area, cr, points[j]);
         }
         
-
-        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
-        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
     }
 
     // Polygons
@@ -1230,80 +1180,22 @@ Bool rotation(char *content,
         polygon_tt foo = array_get(arr_polygons, i);
 
         array_tt p_points = polygon_get_points(foo);
-        int line_algh = polygon_get_algh(foo);
 
         point_tt p_pinned = array_get(p_points, 0);
         double pinned_x = point_x_coord(p_pinned),
                pinned_y = point_y_coord(p_pinned);
-        draw_brush(Widgets.drawing_area, cr, pinned_x, pinned_y, color_get_colors(point_color(p_pinned)));
-        draw_text(Widgets.drawing_area, cr, p_pinned);
-        aux[cont++] = point_id(p_pinned);
 
         for ( int j = 1; j < array_get_curr_num(p_points) ; j++ )
         {   
             struct point *p = array_get(p_points, j);
-            aux[cont++] = point_id(p);
             double new_x = ( (point_x_coord(p) - pinned_x) * cos(rotation[0])) - ( (point_y_coord(p) - pinned_y) * sin(rotation[0])),
                    new_y = ( (point_x_coord(p) - pinned_x) * sin(rotation[0])) + ( (point_y_coord(p) - pinned_y) * cos(rotation[0]));
             point_set_coord(p, new_x + pinned_x, new_y + pinned_y);
-            draw_brush(Widgets.drawing_area, cr, new_x + pinned_x, new_y + pinned_y, color_get_colors(point_color(p)));
-            draw_text(Widgets.drawing_area, cr, p);
-        }
-
-        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
-        {
-            struct point *pInit = array_get(p_points, j);
-            struct point *pFinal = array_get(p_points, j + 1);
-
-            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
-            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
-        }
-        // Closing Polygon
-        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
-        struct point *pFinal = array_get(p_points, 0);
-
-        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
-        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
-    }
-
-    // Circumference.
-    for ( int i = 0; i < array_get_curr_num(arr_circumferences); i++ )
-    {
-        circumference_tt foo = array_get(arr_circumferences, i);
-
-        point_tt *points = circumference_get_points(foo);
-
-        for ( int j = 0; j < 2; j++ )
-        {
-            draw_brush(Widgets.drawing_area, cr, point_x_coord(points[j]), point_y_coord(points[j]), color_get_colors(point_color(points[j])));
-            draw_text(Widgets.drawing_area, cr, points[j]);
-        }
-
-        calculate_circumference_points(Widgets.drawing_area, foo);
-    }
-
-    // Drawing all points that aren't part of an object
-    Bool drawn = false;
-    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
-    {
-        drawn = false;
-        point_tt p = array_get(arr_points, i);
-        int id = point_id(p);
-
-        for ( int j = 0; j < MAX_POINTS; j++ )
-        {   
-            if ( id == aux[j] ) drawn = true;
-        }
-
-        if ( !drawn ) 
-        {
-            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
-            draw_text(Widgets.drawing_area, cr, p);
         }
     }
+
+    redraw_objects(Widgets.drawing_area);
     g_print("%lf 22Rotation\n", rotation[0]);
-
-    cairo_destroy(cr);
     return True;
 }
 
@@ -1321,27 +1213,15 @@ Bool scale(char *content,
     double *scale = NULL;
     if ( (scale = check_content(content, transf_id)) == NULL ) return False;
 
-    // Pinning first point always. If not Pinned, scale will also be a translation
-    int aux[MAX_POINTS],
-        cont = 0;
-    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;
-
-    clear_surface(0);
-    gtk_widget_queue_draw(Widgets.drawing_area);
-    cairo_t *cr;
-    cr = cairo_create(surface);
 
     // Lines
     for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
     {
         line_tt foo = array_get(arr_lines, i);
         point_tt *points = line_get_points(foo);
-        int line_algh = line_get_algh(foo);
 
         for ( int j = 0; j < 2; j++ )
         {
-            aux[cont++] = point_id(points[j]);
-
             double new_x = point_x_coord(points[j]),
                    new_y = point_y_coord(points[j]);
             int line_algh = line_get_algh(foo);
@@ -1351,14 +1231,7 @@ Bool scale(char *content,
             else new_y *= scale[1]; 
 
             point_set_coord(points[j], new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
-            draw_text(Widgets.drawing_area, cr, points[j]);
         }
-        
-
-        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
-        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
-
     }
 
     // Polygons
@@ -1367,12 +1240,10 @@ Bool scale(char *content,
         polygon_tt foo = array_get(arr_polygons, i);
 
         array_tt p_points = polygon_get_points(foo);
-        int line_algh = polygon_get_algh(foo);
 
         for ( int j = 0; j < array_get_curr_num(p_points) ; j++ )
         {   
             struct point *p = array_get(p_points, j);
-            aux[cont++] = point_id(p);
             double new_x = point_x_coord(array_get(p_points, j)),
                    new_y = point_y_coord(array_get(p_points, j));
 
@@ -1381,24 +1252,7 @@ Bool scale(char *content,
             if ( scale[1] < 0 ) new_y /= abs(scale[1]);
             else new_y *= scale[1]; 
             point_set_coord(p, new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(p)));
-            draw_text(Widgets.drawing_area, cr, p);
         }
-
-        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
-        {
-            struct point *pInit = array_get(p_points, j);
-            struct point *pFinal = array_get(p_points, j + 1);
-
-            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
-            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
-        }
-        // Closing Polygon
-        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
-        struct point *pFinal = array_get(p_points, 0);
-
-        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
-        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
     }
 
     // Circumference.
@@ -1410,7 +1264,6 @@ Bool scale(char *content,
 
         for ( int j = 0; j < 2; j++ )
         {
-            aux[cont++] = point_id(points[j]);
             double new_x = point_x_coord(points[j]),
                    new_y = point_y_coord(points[j]);
 
@@ -1420,34 +1273,10 @@ Bool scale(char *content,
             else new_y *= scale[1]; 
 
             point_set_coord(points[j], new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
-            draw_text(Widgets.drawing_area, cr, points[j]);
-        }
-
-        calculate_circumference_points(Widgets.drawing_area, foo);
-    }
-    // Drawing all points that aren't part of an object
-    Bool drawn = false;
-    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
-    {
-        drawn = false;
-        point_tt p = array_get(arr_points, i);
-        int id = point_id(p);
-
-        for ( int j = 0; j < MAX_POINTS; j++ )
-        {   
-            if ( id == aux[j] ) drawn = true;
-        }
-
-        if ( !drawn ) 
-        {
-            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
-            draw_text(Widgets.drawing_area, cr, p);
         }
     }
-
+    redraw_objects(Widgets.drawing_area);
     g_print("Scale: %f %f\n", scale[0], scale[1]);
-    cairo_destroy(cr);
 
     free(scale);
     return True;
@@ -1468,37 +1297,19 @@ Bool translation(char *content,
     double *translation = NULL;
     if ( (translation = check_content(content, transf_id)) == NULL ) return False;
 
-    int aux[MAX_POINTS],
-        cont = 0;
-    for (int i = 0; i < MAX_POINTS; i++ ) aux[i] = -2;   
-    
-    clear_surface(0);
-    gtk_widget_queue_draw(Widgets.drawing_area);
-    cairo_t *cr;
-    cr = cairo_create(surface);
-    
-    // Lines
+    // Lines 
     for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
     {
         line_tt foo = array_get(arr_lines, i);
 
         point_tt *points = line_get_points(foo);
-        int line_algh = line_get_algh(foo);
 
-        // TODO Probably this can be anexed in a new function (V)
         for ( int j = 0; j < 2; j++ )
         {
-            aux[cont++] = point_id(points[j]);
             double new_x = point_x_coord(points[j]) + translation[0],
                    new_y = point_y_coord(points[j]) + translation[1];
             point_set_coord(points[j], new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
-            draw_text(Widgets.drawing_area, cr, points[j]);
-        }
-        
-
-        if ( line_algh == 1 ) DDA(points[0], points[1], Widgets.drawing_area);
-        else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
+        }        
     }
 
     // Polygons
@@ -1507,33 +1318,14 @@ Bool translation(char *content,
         polygon_tt foo = array_get(arr_polygons, i);
 
         array_tt p_points = polygon_get_points(foo);
-        int line_algh = polygon_get_algh(foo);
 
         for ( int j = 0; j < array_get_curr_num(p_points) ; j++ )
         {   
             struct point *p = array_get(p_points, j);
-            aux[cont++] = point_id(p);
             double new_x = point_x_coord(p) + translation[0],
                    new_y = point_y_coord(p) + translation[1];
             point_set_coord(p, new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(p)));
-            draw_text(Widgets.drawing_area, cr, p);
         }
-
-        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
-        {
-            struct point *pInit = array_get(p_points, j);
-            struct point *pFinal = array_get(p_points, j + 1);
-
-            if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
-            else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
-        }
-        // Closing Polygon
-        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
-        struct point *pFinal = array_get(p_points, 0);
-
-        if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
-        else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
     }
 
     // Circumference.
@@ -1545,39 +1337,16 @@ Bool translation(char *content,
 
         for ( int j = 0; j < 2; j++ )
         {
-            aux[cont++] = point_id(points[j]);
             double new_x = point_x_coord(points[j]) + translation[0],
                    new_y = point_y_coord(points[j]) + translation[1];
             point_set_coord(points[j], new_x, new_y);
-            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
-            draw_text(Widgets.drawing_area, cr, points[j]);
         }
-
-        calculate_circumference_points(Widgets.drawing_area, foo);
     }
 
+    redraw_objects(Widgets.drawing_area);
     // TODO assim como em todas as outras transformadas, checar se, quando a transformada for feita, o objeto tá dentro da área de recorte
 
-    // Drawing all points that aren't part of an object
-    Bool drawn = false;
-    for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
-    {
-        drawn = false;
-        point_tt p = array_get(arr_points, i);
-        int id = point_id(p);
-
-        for ( int j = 0; j < MAX_POINTS; j++ )
-        {   
-            if ( id == aux[j] ) drawn = true;
-        }
-
-        if ( !drawn ) 
-        {
-            draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
-            draw_text(Widgets.drawing_area, cr, p);
-        }
-    }
-    cairo_destroy(cr);
+ 
     free(translation);
     return True;
 }
