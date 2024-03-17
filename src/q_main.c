@@ -15,6 +15,7 @@
 #include "line.h"
 #include "point.h"
 #include "polygon.h"
+#include "circumference.h"
 
 // #define MAX_POINTS 10
 
@@ -58,6 +59,11 @@ static array_tt arr_lines;
  * @brief Current drawn Polygons.
 */
 static array_tt arr_polygons;
+
+/**
+ * @brief Current drawn Circumferences.
+*/
+static array_tt arr_circumferences;
 
 /**
  * @brief Removes all points drawn in canvas.
@@ -388,6 +394,105 @@ int number_taken_points()
     return num;
 }
 
+void plot_circle_poits(GtkWidget *area,
+                       point_tt   center,
+                       double     x_calc,
+                       double     y_calc)
+{
+    double x_center = point_x_coord(center),
+           y_center = point_y_coord(center);
+
+
+    cairo_t *cr;
+    cr = cairo_create(surface);
+    draw_brush(area, cr, (double) (round(x_center) + round(x_calc)), (double) (round(y_center) + round(y_calc)), color_get_colors(point_color(center)));
+    draw_brush(area, cr, (double) (round(x_center) - round(x_calc)), (double) (round(y_center) + round(y_calc)), color_get_colors(point_color(center)));
+    draw_brush(area, cr, (double) (round(x_center) + round(x_calc)), (double) (round(y_center) - round(y_calc)), color_get_colors(point_color(center)));
+    draw_brush(area, cr, (double) (round(x_center) - round(x_calc)), (double) (round(y_center) - round(y_calc)), color_get_colors(point_color(center)));
+
+    draw_brush(area, cr, (double) (round(x_center) + round(y_calc)), (double) (round(y_center) + round(x_calc)), color_get_colors(point_color(center)));
+    draw_brush(area, cr, (double) (round(x_center) - round(y_calc)), (double) (round(y_center) + round(x_calc)), color_get_colors(point_color(center)));
+    draw_brush(area, cr, (double) (round(x_center) + round(y_calc)), (double) (round(y_center) - round(x_calc)), color_get_colors(point_color(center)));
+    draw_brush(area, cr, (double) (round(x_center) - round(y_calc)), (double) (round(y_center) - round(x_calc)), color_get_colors(point_color(center)));
+
+    cairo_destroy(cr);
+}
+
+/**
+ * @brief Uses the idea of Bresenham's circumference algorithm to identify all points.
+ * 
+ * @param area Area to draw points.
+ * @param c    Given circumference to draw.
+*/
+void calculate_circumference_points(GtkWidget *area,
+                                    struct circumference *c)
+{
+    int x = 0,
+        y = 0, 
+        p = 0,
+        r = 0;
+
+    r = circumference_radius(c);
+    y = r;
+    p = 3 - 2 * r;
+
+    plot_circle_poits(area, circumference_get_points(c)[0], x, y);
+
+    while ( x < y )
+    {
+        if ( p < 0 )
+        {
+            p = p + 4 * x + 6;
+        } else 
+        {
+            p = p + 4 * (x-y) + 10;
+            y--;
+        }
+        x++;
+        plot_circle_poits(area, circumference_get_points(c)[0], x, y);    
+    }
+}
+
+Bool Circumference(GtkWidget *area)
+{
+
+    int controller = number_taken_points(),
+        size_p = array_get_curr_num(arr_points);
+
+
+    if ( (size_p - controller) < 2 ) 
+    {
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: There must be atleast 2 free points to draw a Circumference.");
+        return False;
+    }
+
+    while( controller < size_p )
+    {
+        /**
+         * Must have atleast 2 points to draw a line,
+         * If there is only one, "ignore it".
+         */
+        if ( (size_p - controller) >= 2 )
+        {  
+            struct point *pCenter = array_get(arr_points, controller);
+            struct point *pBorder = array_get(arr_points, controller + 1);
+
+            if ( point_is_taken(pCenter) ) continue;
+
+            struct circumference *new_circumference = circumference_create(pCenter, pBorder);
+            array_set(arr_circumferences, array_get_curr_num(arr_circumferences), new_circumference);
+            point_take(pCenter);
+            point_take(pBorder);
+
+            calculate_circumference_points(area, new_circumference);
+            controller++;
+        } 
+        controller++;
+    }
+    return True;
+    
+}
+
 /**
  * @brief Creates and draws Polygons with previously specified Drawing Algorithm.
  * 
@@ -418,7 +523,6 @@ Bool Polygon(GtkWidget *area)
             points[iterator++] = p;
         }
 
-        
         struct polygon *polygon = polygon_create(points, iterator, algh);
 
         array_set(arr_polygons, array_get_curr_num(arr_polygons), polygon);
@@ -546,10 +650,14 @@ static void drawings_execution(GtkDropDown *dropdown,
         case 2:
             t = clock();
             cntrl = Polygon(drawing_area);
+            t = clock() - t;
             if ( cntrl ) write_execution_time(t);
             break;
         case 3:
-            // Circumference();
+            t = clock();
+            cntrl = Circumference(drawing_area);
+            t = clock() - t;
+            if ( cntrl ) write_execution_time(t);
             break;
         default:
             break;
@@ -574,7 +682,6 @@ char* read_from_until(char *content,
             gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: Template found is invalid. Please, reformulate your input.");
             return NULL;
         }
-        g_print("%c cccc\n", content[*pos]);
         result[controller++] = content[(*pos)++];
     }
 
@@ -713,6 +820,8 @@ Bool xyreflection()
     gtk_widget_queue_draw(Widgets.drawing_area);
     cairo_t *cr;
     cr = cairo_create(surface);
+
+    // Lines.
     for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
     {
         line_tt foo = array_get(arr_lines, i);
@@ -723,10 +832,8 @@ Bool xyreflection()
         for ( int j = 0; j < 2; j++ )
         {
             aux[cont++] = point_id(points[j]);
-            g_print("Antes %f %f\n",point_x_coord(points[j]), point_y_coord(points[j]));
             double new_x = -point_x_coord(points[j]),
                    new_y = point_y_coord(points[j]);
-            g_print("Depois %f %f\n", new_x, new_y);
             point_set_coord(points[j], new_x, new_y);
             draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
             draw_text(Widgets.drawing_area, cr, points[j]);
@@ -736,7 +843,7 @@ Bool xyreflection()
         else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
     }
 
-        // Polygons
+    // Polygons.
     for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
     {
         polygon_tt foo = array_get(arr_polygons, i);
@@ -808,6 +915,8 @@ Bool yreflection()
     gtk_widget_queue_draw(Widgets.drawing_area);
     cairo_t *cr;
     cr = cairo_create(surface);
+    
+    // Lines.
     for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
     {
         line_tt foo = array_get(arr_lines, i);
@@ -830,7 +939,7 @@ Bool yreflection()
         else if ( line_algh == 2 ) Bresenham(points[0], points[1], Widgets.drawing_area);
     }
 
-        // Polygons
+    // Polygons.
     for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
     {
         polygon_tt foo = array_get(arr_polygons, i);
@@ -903,6 +1012,8 @@ Bool xreflection()
     gtk_widget_queue_draw(Widgets.drawing_area);
     cairo_t *cr;
     cr = cairo_create(surface);
+    
+    // Lines.
     for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
     {
         
@@ -1009,6 +1120,8 @@ Bool rotation(char *content,
     cairo_t *cr;
     cr = cairo_create(surface);
     g_print("%lf Rotation\n", rotation[0]);
+
+    // Lines.
     for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
     {
         line_tt foo = array_get(arr_lines, i);
@@ -1344,7 +1457,6 @@ Bool translation(char *content,
     }
     g_print("Translation: %f %f\n", translation[0], translation[1]);
 
-    // free(points);
     free(translation);
     return True;
 }
@@ -1371,8 +1483,7 @@ static void transformation_execution(GtkDropDown *dropdown,
     {
         gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You must draw points to perform transformations.");
         return;
-        // TODO Adicionar na verificação a baixo caso o array de circunferencia e poligonos também esteja vazio.
-    } else if ( dropdown_selected != 0 && array_get_curr_num(arr_lines) == 0 && array_get_curr_num(arr_polygons) == 0 )
+    } else if ( dropdown_selected != 0 && array_get_curr_num(arr_lines) == 0 && array_get_curr_num(arr_polygons) == 0 && array_get_curr_num(arr_circumferences) == 0 )
     {
         gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You must draw an object to perform transformations.");
         return;
@@ -1553,6 +1664,7 @@ int main(int    argc,
     arr_points = array_create(MAX_POINTS);
     arr_lines = array_create(MAX_POINTS);
     arr_polygons = array_create(MAX_POINTS);
+    arr_circumferences = array_create(MAX_POINTS);
 
     app = gtk_application_new("GC.Thiago", G_APPLICATION_FLAGS_NONE);
     g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
