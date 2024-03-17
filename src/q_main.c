@@ -86,6 +86,8 @@ static void clear_surface(int flag)
         arr_lines = array_create(MAX_POINTS);
         array_destroy(arr_polygons);
         arr_polygons = array_create(MAX_POINTS);
+        array_destroy(arr_circumferences);
+        arr_circumferences = array_create(MAX_POINTS);
     }
 }
 
@@ -367,6 +369,7 @@ static void close_window(void)
     array_destroy(arr_points);
     array_destroy(arr_lines);
     array_destroy(arr_polygons);
+    array_destroy(arr_circumferences);
     if ( surface ) cairo_surface_destroy(surface);
 }
 
@@ -394,7 +397,16 @@ int number_taken_points()
     return num;
 }
 
-void plot_circle_poits(GtkWidget *area,
+/**
+ * @brief Using equality of points, plotting a circumference.
+ * 
+ * @param area   Drawing area.
+ * @param center Circumference's center point.
+ * @param x_calc X coordinate to be plotted.
+ * @param y_calc Y coordinate to be plotted.
+ *
+*/
+void plot_circle_points(GtkWidget *area,
                        point_tt   center,
                        double     x_calc,
                        double     y_calc)
@@ -436,7 +448,9 @@ void calculate_circumference_points(GtkWidget *area,
     y = r;
     p = 3 - 2 * r;
 
-    plot_circle_poits(area, circumference_get_points(c)[0], x, y);
+    struct point *center = circumference_get_points(c)[0];
+
+    plot_circle_points(area, center, x, y);
 
     while ( x < y )
     {
@@ -449,10 +463,17 @@ void calculate_circumference_points(GtkWidget *area,
             y--;
         }
         x++;
-        plot_circle_poits(area, circumference_get_points(c)[0], x, y);    
+        plot_circle_points(area, center, x, y);    
     }
 }
 
+/**
+ * @brief Creates and draws Circumferences with Bresenham's circumference algorithm.
+ * 
+ * @param area Drawing Area.
+ * 
+ * @returns True if code was correctly executed, False otherwise.
+*/
 Bool Circumference(GtkWidget *area)
 {
 
@@ -785,7 +806,7 @@ double* check_content(char* content,
     // Rotation. Should be informed as: 'X' - Where X is an integer rotation degree value (pos or neg).
     else if ( transf_id == 2 )
     {
-        if ( strlen(content) > 4 )
+        if ( strlen(content) > 5 )
         {
             gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: Rotation template is: 'INT'. Please, reformulate your input.");
             return NULL;
@@ -877,8 +898,26 @@ Bool xyreflection()
         if ( algh == 1 ) DDA(pInit, pFinal, Widgets.drawing_area);
         else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
     }
-    // TODO Copy the same idea above, but for Poligons and Circumference.
+    
+    // Circumference.
+    for ( int i = 0; i < array_get_curr_num(arr_circumferences); i++ )
+    {
+        circumference_tt foo = array_get(arr_circumferences, i);
 
+        point_tt *points = circumference_get_points(foo);
+
+        for ( int j = 0; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+            double new_x = -point_x_coord(points[j]),
+                   new_y = -point_y_coord(points[j]);
+            point_set_coord(points[j], new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+
+        calculate_circumference_points(Widgets.drawing_area, foo);
+    }
 
     // Drawing all points that aren't part of an object
     Bool drawn = false;
@@ -974,8 +1013,25 @@ Bool yreflection()
         else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
     }
 
-    // TODO Copy the same idea above, but for Poligons and Circumference.
+    // Circumference.
+    for ( int i = 0; i < array_get_curr_num(arr_circumferences); i++ )
+    {
+        circumference_tt foo = array_get(arr_circumferences, i);
 
+        point_tt *points = circumference_get_points(foo);
+
+        for ( int j = 0; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+            double new_x = -point_x_coord(points[j]),
+                   new_y = point_y_coord(points[j]);
+            point_set_coord(points[j], new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+
+        calculate_circumference_points(Widgets.drawing_area, foo);
+    }
 
 
     // Drawing all points that aren't part of an object
@@ -1072,7 +1128,25 @@ Bool xreflection()
         else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
     }
 
-    // TODO Copy the same idea above, but for Poligons and Circumference.
+    // Circumference.
+    for ( int i = 0; i < array_get_curr_num(arr_circumferences); i++ )
+    {
+        circumference_tt foo = array_get(arr_circumferences, i);
+
+        point_tt *points = circumference_get_points(foo);
+
+        for ( int j = 0; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+            double new_x = point_x_coord(points[j]),
+                   new_y = -point_y_coord(points[j]);
+            point_set_coord(points[j], new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+
+        calculate_circumference_points(Widgets.drawing_area, foo);
+    }
 
     // Drawing all points that aren't part of an object
     Bool drawn = false;
@@ -1097,7 +1171,6 @@ Bool xreflection()
     return True;
 }
 
-// TODO Acho que essa parada aqui tá errada... Mas num sei 
 Bool rotation(char *content,
               int   transf_id)
 {
@@ -1193,10 +1266,21 @@ Bool rotation(char *content,
         else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
     }
 
+    // Circumference.
+    for ( int i = 0; i < array_get_curr_num(arr_circumferences); i++ )
+    {
+        circumference_tt foo = array_get(arr_circumferences, i);
 
-    // TODO Copy the same idea above, but for Poligons (Rotation in Circumference is useless).
+        point_tt *points = circumference_get_points(foo);
 
+        for ( int j = 0; j < 2; j++ )
+        {
+            draw_brush(Widgets.drawing_area, cr, point_x_coord(points[j]), point_y_coord(points[j]), color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
 
+        calculate_circumference_points(Widgets.drawing_area, foo);
+    }
 
     // Drawing all points that aren't part of an object
     Bool drawn = false;
@@ -1254,11 +1338,7 @@ Bool scale(char *content,
         point_tt *points = line_get_points(foo);
         int line_algh = line_get_algh(foo);
 
-        draw_brush(Widgets.drawing_area, cr, point_x_coord(points[0]), point_y_coord(points[0]), color_get_colors(point_color(points[0])));
-        draw_text(Widgets.drawing_area, cr, points[0]);
-        aux[cont++] = point_id(points[0]);
-
-        for ( int j = 1; j < 2; j++ )
+        for ( int j = 0; j < 2; j++ )
         {
             aux[cont++] = point_id(points[j]);
 
@@ -1321,9 +1401,31 @@ Bool scale(char *content,
         else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
     }
 
+    // Circumference.
+    for ( int i = 0; i < array_get_curr_num(arr_circumferences); i++ )
+    {
+        circumference_tt foo = array_get(arr_circumferences, i);
 
-    // TODO Copy the same idea above, but for Circumferences.
+        point_tt *points = circumference_get_points(foo);
 
+        for ( int j = 0; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+            double new_x = point_x_coord(points[j]),
+                   new_y = point_y_coord(points[j]);
+
+            if ( scale[0] < 0 ) new_x /= abs(scale[0]);
+            else new_x *= scale[0];
+            if ( scale[1] < 0 ) new_y /= abs(scale[1]);
+            else new_y *= scale[1]; 
+
+            point_set_coord(points[j], new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+
+        calculate_circumference_points(Widgets.drawing_area, foo);
+    }
     // Drawing all points that aren't part of an object
     Bool drawn = false;
     for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
@@ -1434,7 +1536,27 @@ Bool translation(char *content,
         else if ( algh == 2 ) Bresenham(pInit, pFinal, Widgets.drawing_area);
     }
 
-    // TODO Copy the same idea above, but for Poligons (Rotation in Circumference is useless).
+    // Circumference.
+    for ( int i = 0; i < array_get_curr_num(arr_circumferences); i++ )
+    {
+        circumference_tt foo = array_get(arr_circumferences, i);
+
+        point_tt *points = circumference_get_points(foo);
+
+        for ( int j = 0; j < 2; j++ )
+        {
+            aux[cont++] = point_id(points[j]);
+            double new_x = point_x_coord(points[j]) + translation[0],
+                   new_y = point_y_coord(points[j]) + translation[1];
+            point_set_coord(points[j], new_x, new_y);
+            draw_brush(Widgets.drawing_area, cr, new_x, new_y, color_get_colors(point_color(points[j])));
+            draw_text(Widgets.drawing_area, cr, points[j]);
+        }
+
+        calculate_circumference_points(Widgets.drawing_area, foo);
+    }
+
+    // TODO assim como em todas as outras transformadas, checar se, quando a transformada for feita, o objeto tá dentro da área de recorte
 
     // Drawing all points that aren't part of an object
     Bool drawn = false;
@@ -1455,8 +1577,7 @@ Bool translation(char *content,
             draw_text(Widgets.drawing_area, cr, p);
         }
     }
-    g_print("Translation: %f %f\n", translation[0], translation[1]);
-
+    cairo_destroy(cr);
     free(translation);
     return True;
 }
@@ -1478,7 +1599,6 @@ static void transformation_execution(GtkDropDown *dropdown,
     clock_t t;
     Bool cntrl;
 
-    g_print("Size: %d\n", array_get_curr_num(arr_points));
     if ( dropdown_selected != 0 && array_get_curr_num(arr_points) == 0 )
     {
         gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You must draw points to perform transformations.");
@@ -1528,6 +1648,7 @@ static void transformation_execution(GtkDropDown *dropdown,
             if ( cntrl ) write_execution_time(t);
             break;
         default:
+            gtk_label_set_label(GTK_LABEL(Widgets.label), "Debug informations here...");
             break;
     }
 
@@ -1583,7 +1704,7 @@ static void activate(GtkApplication *app,
     const char *dropdown_content_algorithms[4] = {"Drawing Algorithms\0", "DDA\0", "Bresenham\0"};
     const char *dropdown_content_drawings[5] = {"Objects\0", "Line\0", "Polygon\0", "Circumference\0"};
     const char *dropdown_content_transformations[8] = {"Geometric Transformations\0", "Translate\0", "Rotate\0", "Scale\0", "X Reflection\0", "Y Reflection\0", "XY Reflection\0"};
-    const char *dropdown_content_croppings[4] = {"Cropping Algorithms\0", "Cohen-Sutherland\0", "Liang-Barsky\0"};
+    const char *dropdown_content_croppings[5] = {"Cropping Algorithms\0", "Cohen-Sutherland\0", "Liang-Barsky\0", "Clear"};
 
     int width,
         height;
