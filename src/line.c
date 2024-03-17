@@ -8,13 +8,13 @@ struct line
 {
     int      desired_algh;    /** << Desired algorithm to draw. */
     int      l_id;            /** << Line identifier.           */
-    int      was_cropped;     /** << If line was cropped.       */
+    int      was_clipped;     /** << If line was clipped.       */
 
     point_tt initial;         /** << Initial point.             */
     point_tt final;           /** << Final point.               */
 
-    point_tt cropped_initial; /** << Cropped initial point.     */
-    point_tt cropped_final;   /** << Cropped final point.       */
+    point_tt clipped_initial; /** << clipped initial point.     */
+    point_tt clipped_final;   /** << clipped final point.       */
 };
 
 /**
@@ -35,12 +35,12 @@ line_tt line_create(struct point *initial, struct point *final, int algh)
 {
     struct line *l = (struct line*) malloc(sizeof(struct line));
     l->desired_algh = algh;
-    l->was_cropped = 0;
+    l->was_clipped = 0;
     l->l_id = next_l_id++;
     l->initial = initial;
     l->final = final;
-    l->cropped_initial = NULL;
-    l->cropped_final = NULL;
+    l->clipped_initial = NULL;
+    l->clipped_final = NULL;
 
     return (l);
 }
@@ -54,10 +54,10 @@ void line_destroy(struct line *l)
 {
     /* Sanity Check. */
     assert( l != NULL );
-    if ( l->was_cropped )
+    if ( l->was_clipped )
     {
-        point_destroy(l->cropped_initial);
-        point_destroy(l->cropped_final);
+        point_destroy(l->clipped_initial);
+        point_destroy(l->clipped_final);
     }
     point_destroy(l->initial);
     point_destroy(l->final);
@@ -66,22 +66,23 @@ void line_destroy(struct line *l)
 }
 
 /**
- * @brief Adds new points to a line whenever it gets cropped.
+ * @brief Adds new points to a line whenever it gets clipped. If points are NULL, it implies that line won't be clipped anymore.
  * 
  * @param l       Given line.
- * @param initial Initial cropped point of a line.
- * @param final   Final cropped point of a line.
+ * @param initial Initial clipped point of a line.
+ * @param final   Final clipped point of a line.
 */
-void line_add_cropped_points(struct line *l, struct point *c_i, struct point *c_f)
+void line_add_clipped_points(struct line *l, struct point *c_i, struct point *c_f)
 {
     /* Sanity Check. */
     assert( l != NULL );
-    assert( c_i != NULL );
-    assert( c_f != NULL );
-
-    l->was_cropped = 1;
-    l->cropped_initial = c_i;
-    l->cropped_final = c_f;
+    
+    if ( c_i != NULL && c_f != NULL )
+    {
+        l->was_clipped = 1;
+        l->clipped_initial = c_i;
+        l->clipped_final = c_f;
+    } else l->was_clipped = 0;
 }
 
 /**
@@ -103,19 +104,19 @@ point_tt* line_get_points(const struct line *l)
 }
 
 /**
- * @brief Returns Line's cropped points.
+ * @brief Returns Line's clipped points.
  * 
  * @param l Desired Line.
  * 
- * @returns Line's cropped points. Initial = 1st index, Final = 2nd index.
+ * @returns Line's clipped points. Initial = 1st index, Final = 2nd index.
 */
-point_tt* line_get_cropped_points(const struct line *l)
+point_tt* line_get_clipped_points(const struct line *l)
 {
     /* Sanity Check. */
     assert( l != NULL );
     struct point **points = (point_tt*) malloc(sizeof(point_tt) * 2);
-    points[0] = l->cropped_initial;
-    points[1] = l->cropped_final;
+    points[0] = l->clipped_initial;
+    points[1] = l->clipped_final;
 
     return (points);
 }
@@ -133,6 +134,21 @@ int line_get_algh(const struct line *l)
     assert( l != NULL );
 
     return (l->desired_algh);
+}
+
+/**
+ * @brief Checks if line was clipped.
+ * 
+ * @param l Desired Line.
+ * 
+ * @returns If line was clipped.
+*/
+int line_was_clipped(const struct line *l)
+{
+    /* Sanity Check. */
+    assert( l != NULL );
+
+    return (l->was_clipped);
 }
 
 /**

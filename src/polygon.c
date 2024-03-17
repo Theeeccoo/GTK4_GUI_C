@@ -7,11 +7,11 @@ struct polygon
 {
     int      desired_algh;   /** << Desired algorithm to draw. */
     int      pl_id;          /** << Polygon identifier.        */
-    int      was_cropped;    /** << If polygon was cropped.    */
+    int      was_clipped;    /** << If polygon was clipped.    */
 
 
     array_tt points;         /** << Polygon's points.          */
-    array_tt cropped_points; /** << Polygon's croppped points. */
+    array_tt clipped_points; /** << Polygon's croppped points. */
 };
 
 /**
@@ -36,9 +36,9 @@ polygon_tt polygon_create(struct point **points, int size, int algh)
     
     pl->desired_algh = algh;
     pl->pl_id = next_pl_id++;
-    pl->was_cropped = 0;
+    pl->was_clipped = 0;
     pl->points = array_create(MAX_POINTS);
-    pl->cropped_points = array_create(MAX_POINTS);
+    pl->clipped_points = array_create(MAX_POINTS);
     
 
     for ( int i = 0; i < size; i++ )
@@ -50,25 +50,28 @@ polygon_tt polygon_create(struct point **points, int size, int algh)
 }
 
 /**
- * @brief Adds new points to a polygon whenever it gets cropped.
+ * @brief Adds new points to a polygon whenever it gets clipped. If size == 0, it imples that polygon won't be clipped anymore
  * 
- * @param l       Given polygon.
- * @param initial Initial cropped point of a polygon.
- * @param final   Final cropped point of a polygon.
+ * @param pl     Given polygon.
+ * @param size   Number of clipped points.
+ * @param points Clipped points of a polygon.
 */
-void polygon_add_cropped_points(struct polygon *pl, struct point **points)
+void polygon_add_clipped_points(struct polygon *pl, struct point **points, int size)
 {
     /* Sanity Check. */
     assert( pl != NULL );
     assert( points != NULL );
-    int size = sizeof(points) / sizeof(points[0]);
     assert( size < MAX_POINTS );
     
-    pl->was_cropped = 1;
-    for ( int i = 0; i < size; i++ )
+    if ( size > 0 )
     {
-        array_set(pl->cropped_points, i, points[i]);
-    }
+        pl->was_clipped = 1;
+        for ( int i = 0; i < size; i++ )
+        {
+            array_set(pl->clipped_points, i, points[i]);
+        }
+    } else pl->was_clipped = 0;
+     
 }
 
 /**
@@ -87,18 +90,18 @@ array_tt polygon_get_points(const struct polygon *pl)
 }
 
 /**
- * @brief Returns Polygons's cropped points.
+ * @brief Returns Polygons's clipped points.
  * 
- * @param l Desired Polygons.
+ * @param pl Desired Polygons.
  * 
- * @returns Polygons's cropped points.
+ * @returns Polygons's clipped points.
 */
-array_tt polygons_get_cropped_points(const struct polygon *pl)
+array_tt polygon_get_clipped_points(const struct polygon *pl)
 {
     /* Sanity Check. */
     assert( pl != NULL );
     
-    return (pl->cropped_points);
+    return (pl->clipped_points);
 }
 
 
@@ -111,7 +114,7 @@ void polygon_destroy(struct polygon *pl)
 {
     /* Sanity Check. */
     assert( pl != NULL );
-    array_destroy(pl->cropped_points);
+    array_destroy(pl->clipped_points);
     array_destroy(pl->points);
 
     free(pl);
@@ -130,6 +133,21 @@ int polygon_get_algh(const struct polygon *pl)
     assert( pl != NULL );
 
     return (pl->desired_algh);
+}
+
+/**
+ * @brief Checks if Polygon was clipped.
+ * 
+ * @param pl Desired Polygon.
+ * 
+ * @returns If Polygon was clipped.
+*/
+int polygon_was_clipped(const struct polygon *pl)
+{
+    /* Sanity Check. */
+    assert( pl != NULL );
+
+    return (pl->was_clipped);
 }
 
 /**
