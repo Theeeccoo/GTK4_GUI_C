@@ -16,12 +16,12 @@
 #include "point.h"
 #include "polygon.h"
 #include "circumference.h"
+#include "clipping.h"
 
 // #define MAX_POINTS 10
 
 static cairo_surface_t *surface = NULL;
 static int algh = 0;
-static int cropp = 0;
 
 /**
  * @brief All Widgets from our interface.
@@ -66,6 +66,11 @@ static array_tt arr_polygons;
 static array_tt arr_circumferences;
 
 /**
+ * @brief Current drawn Clips.
+*/
+static array_tt arr_clips;
+
+/**
  * @brief Removes all points drawn in canvas.
 */
 static void clear_surface(int flag)
@@ -88,6 +93,8 @@ static void clear_surface(int flag)
         arr_polygons = array_create(MAX_POINTS);
         array_destroy(arr_circumferences);
         arr_circumferences = array_create(MAX_POINTS);
+        array_destroy(arr_clips);
+        arr_clips = array_create(MAX_POINTS);
     }
 }
 
@@ -205,7 +212,6 @@ static void draw_brush(GtkWidget *area,
     int center_x = 0,
         center_y = 0; 
     gtk_widget_get_size_request(Widgets.drawing_area, &center_x, &center_y);
-    // g_print("%lf %lf\n", x, y);
     cairo_set_source_rgb(cr, c[0], c[1], c[2]);
     cairo_rectangle(cr, (x + (center_x/2))- 3, ((center_y/2) - y ) - 3, 6, 6);
     cairo_fill(cr);
@@ -229,7 +235,6 @@ static void draw(GtkGestureDrag *gesture,
         gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You have reached maximum amount of Points.");
         return;
     }
-    g_print("1 X %f, Y %f\n", x, y);
     // Redefining center point to be exactly the center of canvas. In canvas 0,0 is in the top-left corner.
     int center_x = 0,
         center_y = 0; 
@@ -239,11 +244,7 @@ static void draw(GtkGestureDrag *gesture,
     struct point *p = point_create(x, y);
     array_set(arr_points, array_get_curr_num(arr_points), p);
 
-    g_print(" X %f, Y %f\n", point_x_coord(p), point_y_coord(p));
-
-    // If cropping algorithm is NOT selected, define point color to black, otherwise, red
-    if ( !cropp ) point_define_color(p, 0.0, 0.0, 0.0);
-    else          point_define_color(p, 255.0, 0.0, 0.0);
+    point_define_color(p, 0.0, 0.0, 0.0);
 
     cairo_t *cr;
 
@@ -253,6 +254,13 @@ static void draw(GtkGestureDrag *gesture,
     cairo_destroy(cr);
 }
 
+/**
+ * @brief Uses bresenham algorithm to draw a line between two points. 
+ * 
+ * @param pInit  Initial point of Line.
+ * @param pFinal Final point of Line.
+ * @param area   Drawing area.
+*/
 void Bresenham(point_tt pInit, 
                point_tt pFinal,
                GtkWidget *area)
@@ -311,6 +319,13 @@ void Bresenham(point_tt pInit,
 
 }
 
+/**
+ * @brief Uses DDA algorithm to draw a line between two points. 
+ * 
+ * @param pInit  Initial point of Line.
+ * @param pFinal Final point of Line.
+ * @param area   Drawing area.
+*/
 void DDA(point_tt pInit,
          point_tt pFinal,
          GtkWidget *area)
@@ -662,8 +677,7 @@ void redraw_objects(GtkWidget *area)
         struct line *line = array_get(arr_lines, i);
         int line_algh = line_get_algh(line);
         
-        // TODO talvez tenha que adicionar uma outra opção pra caso o objeto não esteja dentro do recorte, ai nem desenha ele
-        if ( !line_was_clipped(line) ) 
+        if ( line_was_clipped(line) == 0 ) 
         {
             points = line_get_points(line);
 
@@ -672,14 +686,20 @@ void redraw_objects(GtkWidget *area)
             for ( int j = 0; j < 2; j++ )
                 if ( oposite[j] != NULL ) aux[cont++] = point_id(oposite[j]);
         }
-        else
+        else if ( line_was_clipped(line) == 1 )
         {
             points = line_get_clipped_points(line);
 
             // Preventing errors
             oposite = line_get_points(line);
-            for ( int j = 0; j < 2; j++ )
+            for ( int j = 0; j < 2; j++ ) {
                 if ( oposite[j] != NULL ) aux[cont++] = point_id(oposite[j]);
+            }
+        }
+        // Implementation decision. Whenever one of polygon's side is not IN the clip area, don't draw the polygon at all
+         else if ( line_was_clipped(line) == 2 )
+        {
+            continue;
         }
 
         // Redrawing points
@@ -687,7 +707,7 @@ void redraw_objects(GtkWidget *area)
         {
             aux[cont++] = point_id(points[j]);
             double x = point_x_coord(points[j]),
-                    y = point_y_coord(points[j]);
+                   y = point_y_coord(points[j]);
             draw_brush(Widgets.drawing_area, cr, x, y, color_get_colors(point_color(points[j])));
             draw_text(Widgets.drawing_area, cr, points[j]);
         }
@@ -706,7 +726,7 @@ void redraw_objects(GtkWidget *area)
         array_tt p_points;
         array_tt p_oposite;
 
-        if ( !polygon_was_clipped(pl) ) 
+        if ( polygon_was_clipped(pl) == 0 ) 
         {
             p_points = polygon_get_points(pl);
 
@@ -715,14 +735,20 @@ void redraw_objects(GtkWidget *area)
             for ( int j = 0; j < array_get_curr_num(p_oposite); j++ )
                 if ( array_get(p_oposite, j) != NULL ) aux[cont++] = point_id(array_get(p_oposite, j));
         }
-        else
+        else if ( polygon_was_clipped(pl) == 1 )
         {
             p_points = polygon_get_clipped_points(pl);
 
             // Preventing errors
             p_oposite = polygon_get_points(pl);
-            for ( int j = 0; j < array_get_curr_num(p_oposite); j++ )
-                if ( array_get(p_oposite, j) != NULL ) aux[cont++] = point_id(array_get(p_oposite, j));
+            for ( int j = 0; j < array_get_curr_num(p_oposite); j++ ) 
+            {
+                aux[cont++] = point_id(array_get(p_oposite, j));
+            }
+        } 
+        else if ( polygon_was_clipped(pl) == 2 )
+        {
+            continue;
         }
 
         // Redrawing points
@@ -731,7 +757,7 @@ void redraw_objects(GtkWidget *area)
             struct point *p = array_get(p_points, j);
             aux[cont++] = point_id(p);
             double x = point_x_coord(array_get(p_points, j)),
-                    y = point_y_coord(array_get(p_points, j));
+                   y = point_y_coord(array_get(p_points, j));
             draw_brush(Widgets.drawing_area, cr, x, y, color_get_colors(point_color(p)));
             draw_text(Widgets.drawing_area, cr, p);
         }
@@ -773,18 +799,57 @@ void redraw_objects(GtkWidget *area)
         calculate_circumference_points(Widgets.drawing_area, circumference);
     }
 
+    // Clips
+    for ( int i = 0; i < array_get_curr_num(arr_clips); i++ )
+    {
+        struct clip *cl = array_get(arr_clips, i);
+        array_tt p_points;
+
+
+        p_points = clip_get_points(cl);
+
+        // Redrawing points
+        for ( int j = 0; j < array_get_curr_num(p_points) ; j++ )
+        {   
+            struct point *p = array_get(p_points, j);
+            aux[cont++] = point_id(p);
+            double x = point_x_coord(array_get(p_points, j)),
+                   y = point_y_coord(array_get(p_points, j));
+            draw_brush(Widgets.drawing_area, cr, x, y, color_get_colors(point_color(p)));
+            draw_text(Widgets.drawing_area, cr, p);
+        }
+
+        // Redrawing lines between points
+        for ( int j = 0; j < array_get_curr_num(p_points) - 1; j++ )
+        {
+            struct point *pInit = array_get(p_points, j);
+            struct point *pFinal = array_get(p_points, j + 1);
+
+            DDA(pInit, pFinal, Widgets.drawing_area);
+        }
+        // Closing Polygon
+        struct point *pInit = array_get(p_points, array_get_curr_num(p_points) - 1);
+        struct point *pFinal = array_get(p_points, 0);
+
+        DDA(pInit, pFinal, Widgets.drawing_area);
+    }
+
     // Points
     // Drawing all points that aren't part of an object
-    Bool drawn = false;
+    Bool drawn = False;
     for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
     {
-        drawn = false;
+        drawn = False;
         point_tt p = array_get(arr_points, i);
         int id = point_id(p);
 
-        for ( int j = 0; j < MAX_POINTS; j++ )
+        for ( int j = 0; j < cont; j++ )
         {   
-            if ( id == aux[j] ) drawn = true;
+            if ( id == aux[j] ) 
+            { 
+                drawn = True;
+                break;
+            }
         }
 
         if ( !drawn ) 
@@ -812,7 +877,6 @@ static void drawings_execution(GtkDropDown *dropdown,
     Bool cntrl = False;
 
     GtkWidget *drawing_area = GTK_WIDGET(user_data);
-    g_print("Drawing: %d!\n", dropdown_selected);
     switch (dropdown_selected)
     {
         case 1:
@@ -839,6 +903,7 @@ static void drawings_execution(GtkDropDown *dropdown,
 
 
 }
+
 
 // TODO Isso vai pra Utils
 char* read_from_until(char *content,
@@ -970,7 +1035,6 @@ double* check_content(char* content,
         if ( first == NULL ) return NULL;
 
         ang = strtod(first, &foo);
-        g_print("Anb %f\n", ang);
         values[0] = ang * M_PI / 180.0;
         values[1] = -1;
         values[2] = -1;
@@ -984,6 +1048,11 @@ double* check_content(char* content,
     free(foo);
 }
 
+/**
+ * @brief Applies the XYReflection in all points of all drawn objects (except Clips). After changing values, calls "redraw_objects" function to redraw everything at new position.
+ * 
+ * @return True if code execution was correct. False otherwise
+*/
 Bool xyreflection()
 {
     // Lines.
@@ -1036,6 +1105,11 @@ Bool xyreflection()
     return True;
 }
 
+/**
+ * @brief Applies the YReflection in all points of all drawn objects (except Clips). After changing values, calls "redraw_objects" function to redraw everything at new position.
+ * 
+ * @return True if code execution was correct. False otherwise
+*/
 Bool yreflection()
 {
     // Lines.
@@ -1087,6 +1161,11 @@ Bool yreflection()
     return True;
 }
 
+/**
+ * @brief Applies the XReflection in all points of all drawn objects (except Clips). After changing values, calls "redraw_objects" function to redraw everything at new position.
+ * 
+ * @return True if code execution was correct. False otherwise
+*/
 Bool xreflection()
 {    
     // Lines.
@@ -1140,6 +1219,13 @@ Bool xreflection()
     return True;
 }
 
+
+/**
+ * @brief Pins the first point and applies the Rotation in each point (besides the pinned one) of all drawn objects (except Clips). After changing values, calls "redraw_objects" function to redraw everything at new position.
+ * Since points are pinned, circumference won't be rotated (Since the first point is the center of the circumference).
+ * 
+ * @return True if code execution was correct. False otherwise
+*/
 Bool rotation(char *content,
               int   transf_id)
 {
@@ -1195,10 +1281,15 @@ Bool rotation(char *content,
     }
 
     redraw_objects(Widgets.drawing_area);
-    g_print("%lf 22Rotation\n", rotation[0]);
     return True;
 }
 
+/**
+ * @brief Applies the Scale in all points of all drawn objects (except Clips). After changing values, calls "redraw_objects" function to redraw everything at new position.
+ * When values specified are negative, it means to SHRINK "the objetct". Positive values means to increase it.
+ * 
+ * @return True if code execution was correct. False otherwise
+*/
 Bool scale(char *content, 
            int   transf_id)
 {
@@ -1209,7 +1300,7 @@ Bool scale(char *content,
         return False;
     }
 
-    // When Scaling, whenever a value is negative, it means to SHRINK "the points". Positive values means to increase
+    // When Scaling, whenever a value is negative, it means to SHRINK "the object". Positive values means to increase
     double *scale = NULL;
     if ( (scale = check_content(content, transf_id)) == NULL ) return False;
 
@@ -1276,7 +1367,6 @@ Bool scale(char *content,
         }
     }
     redraw_objects(Widgets.drawing_area);
-    g_print("Scale: %f %f\n", scale[0], scale[1]);
 
     free(scale);
     return True;
@@ -1284,6 +1374,11 @@ Bool scale(char *content,
 
 }
 
+/**
+ * @brief Applies the Translation in all points of all drawn objects (except Clips). After changing values, calls "redraw_objects" function to redraw everything at new position.
+ * 
+ * @return True if code execution was correct. False otherwise
+*/
 Bool translation(char *content,
                  int   transf_id)
 {
@@ -1344,8 +1439,6 @@ Bool translation(char *content,
     }
 
     redraw_objects(Widgets.drawing_area);
-    // TODO assim como em todas as outras transformadas, checar se, quando a transformada for feita, o objeto tá dentro da área de recorte
-
  
     free(translation);
     return True;
@@ -1421,8 +1514,526 @@ static void transformation_execution(GtkDropDown *dropdown,
             break;
     }
 
-    g_print("Hello World %s %d!\n", content, dropdown_selected);
 }
+
+
+/**
+ * @brief Creates a CLIP structure based on two points drawn by the user. Since the CLIP must have a rectangle shape, the other two points are created based on X and Y of drawn points.
+ * Drawing algorithm used is DDA.
+ * 
+ * @return True if code execution was correct. False otherwise
+*/
+Bool clip_structure()
+{
+    int controller = number_taken_points(),
+        size_p = array_get_curr_num(arr_points),
+        iterator = 0;
+
+    if ( array_get_curr_num(arr_clips) >= 1 )
+    {
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You cant have only 1 clip area per time.");
+        return True;
+    }
+
+    if ( controller + 4 >= MAX_POINTS )
+    {
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: The number of points will surpass the MAX.");
+        return False;
+    }
+
+    struct point **points = (point_tt*) malloc(sizeof(point_tt) * 4);
+    struct point **aux = (point_tt*) malloc(sizeof(point_tt) * MAX_POINTS);
+    if ( (size_p - controller) >= 2 )
+    { 
+        // Adding all left points into Clip's structure.
+        while ( iterator < 2 ) 
+        {
+            point_tt p = array_get(arr_points, controller++);
+            point_take(p);
+            point_define_color(p, 255.0, 0.0, 0.0);
+            points[iterator++] = p;
+        }
+        point_tt p_first = points[0],
+                 p_third = points[1];
+
+
+        // It must be a perfect rectangle, so User must point the two oposit points, and the others will be generated based on clicked point's coordinates.
+        point_tt p_second = point_create(point_x_coord(p_third), point_y_coord(p_first));
+        point_tt p_fourth = point_create(point_x_coord(p_first), point_y_coord(p_third));
+
+        // Clip's points will always be drawn as red points, just to differentiate from others.
+        point_define_color(p_second, 255.0, 0.0, 0.0);
+        point_define_color(p_fourth, 255.0, 0.0, 0.0);
+        point_take(p_second);
+        point_take(p_fourth);
+        iterator += 2;
+
+        point_tt temp = p_third;
+        points[0] = p_first;
+        points[1] = p_second;
+        points[2] = temp;
+        points[3] = p_fourth;
+
+        int i = 0,
+            idx = 0,
+            j = 0;
+            controller = 0;   
+
+        struct clip *clip = clip_create(points, iterator, algh);
+
+        array_set(arr_clips, 0, clip);
+
+        redraw_objects(Widgets.drawing_area);
+
+        for ( int i = 0; i < iterator - 1; i++ )
+        {
+            struct point *pInit = points[i];
+            struct point *pFinal = points[i + 1];
+            point_take(pInit);
+
+            // Using only DDA, idk why.
+            DDA(pInit, pFinal, Widgets.drawing_area);
+        }
+        // Closing Clip
+        struct point *pInit = points[iterator - 1];
+        struct point *pFinal = points[0];
+
+        DDA(pInit, pFinal, Widgets.drawing_area);
+
+    }else
+    {   
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: There must be atleast 2 free points to draw a Clip.");
+        return False;
+    }
+
+    return True;
+}
+
+/**
+ * @brief Checks where a given DELTA(x) and DELTA(y) are related to CLIP area.
+ * 
+ * @param p  DELTA(X)
+ * @param q  DELTA(Y)
+ * 
+ * @return True if code execution was correct. False otherwise
+*/
+Bool clip_test(double  p,
+               double  q,
+               double *u1,
+               double *u2)
+{
+    Bool result = True;
+    double r = 0.0f;
+
+    // Inwards - outwards
+    if ( p < 0.0f )
+    {
+        r = q / p;
+        if ( r > *u2 ) result = False;
+        else if ( r > *u1 ) *u1 = r;
+    } 
+    // Outwards - Inwards
+    else if ( p > 0.0f )
+    {
+        r = q / p;
+        if ( r < *u1 ) result = False;
+        else if ( r < *u2 ) *u2 = r;
+    } 
+    else if ( q < 0 ) result = False;
+
+    return result;
+}
+
+/**
+ * @brief Uses Liang Barsky's algorithm to recalculate Line's points inside a Clipped area. 
+ * 
+ * @param pInit  Initial Line's point.
+ * @param pFinal Final Line's point.
+ * @param xmin   Clip's XMIN.
+ * @param xmax   Clip's XMAX.
+ * @param ymin   Clip's YMIN.
+ * @param ymax   Clip's YMAX.
+ * @param flag   Flag. > 1 = Create just the first point (clipped_pInit), 0 = Create both points (clipped_pInit clipped_pFinal)
+ * 
+ * @return New clipped points if line inside CLIPPED area. Null otherwise.
+*/
+point_tt* liang_barsky(struct point *pInit,
+                       struct point *pFinal,
+                       int           xmin,
+                       int           xmax,
+                       int           ymin,
+                       int           ymax, 
+                       int           flag)
+{
+    // Because of Float-precision, values had to be rounded, otherwise code would not work.
+    int x1 = (int) point_x_coord(pInit),
+        x2 = (int) point_x_coord(pFinal),
+        y1 = (int) point_y_coord(pInit), 
+        y2 = (int) point_y_coord(pFinal);
+
+    double u1 = 0.0f,
+           u2 = 1.0f;
+    double dx = (double) x2 - x1,
+           dy = (double) y2 - y1;
+
+    point_tt *points = (point_tt*) malloc(sizeof(point_tt) * 2);
+    point_tt c_pInit,
+             c_pFinal;
+    if ( clip_test(-dx, x1 - xmin, &u1, &u2) )
+    {
+        if ( clip_test(dx, xmax - x1, &u1, &u2) )
+        {
+            if ( clip_test(-dy, y1 - ymin, &u1, &u2) )
+            {
+                if ( clip_test(dy, ymax - y1, &u1, &u2 ) )
+                {
+                    if ( floor(u2) < 1.0f )
+                    {
+                        x2 = (int) x1 + u2 * dx;
+                        y2 = (int) y1 + u2 * dy;
+                    }
+                    if ( ceil(u1) > 0.0f )
+                    {
+                        x1 = (int) x1 + u1 * dx;
+                        y1 = (int) y1 + u1 * dy;
+                    }
+                    if ( flag >= 0 )
+                    {
+                        c_pInit = point_create((double) x1, (double)y1);
+                        points[0] = c_pInit;
+                        if ( flag == 0 )
+                        {
+                            c_pFinal = point_create((double)x2, (double)y2);
+                            points[1] = c_pFinal;
+                            point_define_color(c_pFinal, 0.0, 0.0, 0.0);
+                            point_take(c_pFinal);
+                            array_set(arr_points, array_get_curr_num(arr_points), c_pFinal);
+                        }
+                        point_define_color(c_pInit, 0.0, 0.0, 0.0);
+                        point_take(c_pInit);
+
+                        array_set(arr_points, array_get_curr_num(arr_points), c_pInit); 
+                    }
+                    return points;
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+/**
+ * @brief Initializes Clip Structure and operates Liang Barsky's algorithm in (already created) Lines and Polygons.
+ * 
+ * @return True if code execution was correct. False otherwise
+*/
+Bool liang_barsky_init()
+{
+    if ( !clip_structure() ) return False;
+    if ( array_get_curr_num(arr_clips) == 0 ) return False;
+
+    struct clip *clip = array_get(arr_clips, 0);
+    double *maxmin = clip_get_maxmin(clip);
+
+    int xmin = (int) maxmin[0],
+        xmax = (int) maxmin[1],
+        ymin = (int) maxmin[2],
+        ymax = (int) maxmin[3];
+    for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
+    {
+        
+        struct line *foo = array_get(arr_lines, i);
+        point_tt *points = line_get_points(foo);
+
+        struct point *pInit = points[0];
+        struct point *pFinal = points[1];
+        // Whenever you call liang barsky, a new point will be CREATE!!
+        // If you don't want that, make sure to clean the canvas first.
+        points = liang_barsky(pInit, pFinal, xmin, xmax, ymin, ymax, 0);
+        if ( points != NULL ) line_add_clipped_points(foo, points[0], points[1], 1);
+        else line_add_clipped_points(foo, NULL, NULL, 2);
+
+    } 
+
+    struct point *pInit;
+    struct point *pFinal;
+    Bool aux = False;
+    for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
+    {
+        aux = False;
+        struct polygon *foo = array_get(arr_polygons, i);
+        point_tt *points = (point_tt*) malloc(sizeof(point_tt) * 2);
+        array_tt c_points = polygon_get_points(foo);
+        
+        // Whenever you call liang barsky, a new point will be CREATE!!
+        // If you don't want that, make sure to clean the canvas first.
+        for ( int j = 0; j < array_get_curr_num(c_points) - 1; j++ )
+        {
+            pInit = array_get(c_points, j);
+            pFinal = array_get(c_points, j + 1);
+            points = liang_barsky(pInit, pFinal, xmin, xmax, ymin, ymax, 1);
+            if ( points != NULL ) polygon_add_clipped_points(foo, points, 1, 1);
+            else
+            { 
+                aux = True;
+                polygon_add_clipped_points(foo, NULL, 1, 2);
+                break;
+            }
+        }
+        if ( aux ) continue;
+        pInit = array_get(c_points, array_get_curr_num(c_points) - 1);
+        pFinal = array_get(c_points, 0);
+        points = liang_barsky(pInit, pFinal, xmin, xmax, ymin, ymax, 1);
+        if ( points != NULL ) polygon_add_clipped_points(foo, points, 1, 1);
+        else
+        {
+            polygon_add_clipped_points(foo, NULL, 1, 2);        
+            continue;
+        }
+    }    redraw_objects(Widgets.drawing_area);
+    free(maxmin);
+    return True;
+}
+
+/**
+ * @brief Calculate the "Binary" code based in Point XY and where they are related to CLIP area, used in Cohen Sutherland's algorithm.
+ * 
+ * @param x    Point's X coordinate.
+ * @param y    Point's Y coordinate.
+ * @param xmin Clips's XMIN.
+ * @param xmax Clips's XMAX.
+ * @param ymin Clips's YMIN.
+ * @param ymax Clips's YMAX.
+ * 
+ * @returns 
+*/
+int region_code(int x, 
+                int y,
+                int xmin,
+                int xmax,
+                int ymin, 
+                int ymax)
+{
+    int codigo = 0;
+
+    // Left - Bit 0
+    if ( x < xmin ) codigo += 1;
+    // Right - Bit 1
+    if ( x > xmax ) codigo += 2;
+    // Down - Bit 2
+    if ( y < ymin ) codigo += 4;
+    // Up - Bit 3
+    if ( y > ymax ) codigo += 8;
+
+    return codigo;
+}
+
+/**
+ * @brief Uses Cohen Sutherland's algorithm to recalculate Line's points inside a Clipped area. 
+ * 
+ * @param pInit  Initial Line's point.
+ * @param pFinal Final Line's point.
+ * @param xmin   Clip's XMIN.
+ * @param xmax   Clip's XMAX.
+ * @param ymin   Clip's YMIN.
+ * @param ymax   Clip's YMAX.
+ * @param flag   Flag. > 1 = Create just the first point (clipped_pInit), 0 = Create both points (clipped_pInit clipped_pFinal)
+ * 
+ * @return New clipped points if line inside CLIPPED area. Null otherwise.
+*/
+point_tt* cohen_sutherland(struct point *pInit,
+                           struct point *pFinal,
+                           int           xmin,
+                           int           xmax,
+                           int           ymin,
+                           int           ymax, 
+                           int           flag)
+{
+    // Because of Float-precision, values had to be rounded, otherwise code would not work.
+    int x1 = (int) point_x_coord(pInit),
+        x2 = (int) point_x_coord(pFinal),
+        y1 = (int) point_y_coord(pInit), 
+        y2 = (int) point_y_coord(pFinal);
+
+    int c1 = 0,
+        c2 = 0,
+        cfora = 0;
+    int xint = 0,
+        yint = 0;
+    Bool aceite = False,
+         feito = False;
+    
+    point_tt *points = (point_tt*) malloc(sizeof(point_tt) * 2);
+    struct point *c_pInit;
+    struct point *c_pFinal;
+
+    while ( !feito )
+    {   
+        c1 = region_code(x1, y1, xmin, xmax, ymin, ymax);
+        c2 = region_code(x2, y2, xmin, xmax, ymin, ymax);
+        // Fully-in
+        if ( c1 == 0 && c2 == 0 )
+        {    
+            if ( flag >= 0 )
+            {
+                c_pInit = point_create((double) x1, (double)y1);
+                points[0] = c_pInit;
+                if ( flag == 0 )
+                {
+                    c_pFinal = point_create((double)x2, (double)y2);
+                    points[1] = c_pFinal;
+                    point_define_color(c_pFinal, 0.0, 0.0, 0.0);
+                    point_take(c_pFinal);
+                    array_set(arr_points, array_get_curr_num(arr_points), c_pFinal);
+                }
+                point_define_color(c_pInit, 0.0, 0.0, 0.0);
+                point_take(c_pInit);
+
+                array_set(arr_points, array_get_curr_num(arr_points), c_pInit); 
+            }
+            
+
+
+            aceite = True;
+            feito = True;
+        } 
+        // Segment Fully-out
+        else if ( (c1 & c2) != 0 )
+        {
+            feito = True;
+        } else 
+        {
+            if ( c1 != 0 ) {
+                cfora = c1;
+
+            } 
+            else
+            {
+                cfora = c2;
+            }
+
+
+            // Left Lim
+            if ( (cfora & 1) == 1 )
+            {
+                xint = xmin;
+                yint = (int) y1 + ( y2 - y1 ) * ( xmin - x1 ) / ( x2 - x1 );
+            }
+            // Right Lim
+            else if ( (cfora & 2) == 2 )
+            {
+                // g_print("Entrei aqui né krl\n");
+                xint = xmax; 
+                yint = (int) y1 + ( y2 - y1 ) * ( xmax - x1 ) / ( x2 - x1 );
+            }
+            // Dowm Lim
+            else if ( (cfora & 4) == 4)
+            {
+                yint = ymin;
+                xint = (int) x1 + ( x2 - x1 ) * ( ymin - y1 ) / ( y2 - y1 );
+            }
+            // Up Lim.
+            else if ( (cfora & 8) == 8)
+            {
+                yint = ymax;
+                xint = (int) x1 + ( x2 - x1 ) * ( ymax - y1 ) / ( y2 - y1 );
+            }
+
+            if ( cfora == c1 )
+            {
+                x1 = round(xint);
+                y1 = round(yint);
+            } else
+            {
+                x2 =round(xint);
+                y2 = round(yint);
+            }
+        }
+    }
+
+    if ( aceite )
+    {   
+        return points;    
+    }
+    return NULL;
+} 
+
+/**
+ * @brief Initializes Clip Structure and operates Cohen Sutherland's algorithm in (already created) Lines and Polygons.
+ * 
+ * @return True if code execution was correct. False otherwise
+*/
+Bool cohen_init()
+{
+    if ( !clip_structure() ) return False;
+    if ( array_get_curr_num(arr_clips) == 0 ) return False;
+
+    struct clip *clip = array_get(arr_clips, 0);
+    double *maxmin = clip_get_maxmin(clip);
+
+    int xmin = (int) maxmin[0],
+        xmax = (int) maxmin[1],
+        ymin = (int) maxmin[2],
+        ymax = (int) maxmin[3];
+    for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
+    {
+        
+        struct line *foo = array_get(arr_lines, i);
+        point_tt *points = line_get_points(foo);
+
+        struct point *pInit = points[0];
+        struct point *pFinal = points[1];
+        // Whenever you call cohen_sutherlnad, a new point will be CREATE!!
+        // If you don't want that, make sure to clean the canvas first.
+        points = cohen_sutherland(pInit, pFinal, xmin, xmax, ymin, ymax, 0);
+        if ( points != NULL ) line_add_clipped_points(foo, points[0], points[1], 1);
+        else line_add_clipped_points(foo, NULL, NULL, 2);
+
+    } 
+
+    struct point *pInit;
+    struct point *pFinal;
+    Bool aux = False;
+    for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
+    {
+        aux = False;
+        struct polygon *foo = array_get(arr_polygons, i);
+        point_tt *points = (point_tt*) malloc(sizeof(point_tt) * 2);
+        array_tt c_points = polygon_get_points(foo);
+
+        for ( int j = 0; j < array_get_curr_num(c_points) - 1; j++ )
+        {
+            pInit = array_get(c_points, j);
+            pFinal = array_get(c_points, j + 1);
+            // Whenever you call cohen_sutherlnad, a new point will be CREATE!!
+            // If you don't want that, make sure to clean the canvas first.
+            points = cohen_sutherland(pInit, pFinal, xmin, xmax, ymin, ymax, 1);
+            if ( points != NULL ) polygon_add_clipped_points(foo, points, 1, 1);
+            else
+            { 
+                aux = True;
+                polygon_add_clipped_points(foo, NULL, 1, 2);
+                break;
+            }
+        }
+        if ( aux ) continue;
+        pInit = array_get(c_points, array_get_curr_num(c_points) - 1);
+        pFinal = array_get(c_points, 0);
+        points = cohen_sutherland(pInit, pFinal, xmin, xmax, ymin, ymax, 1);
+        if ( points != NULL ) polygon_add_clipped_points(foo, points, 1, 1);
+        else
+        {
+            polygon_add_clipped_points(foo, NULL, 1, 2);        
+            continue;
+        }
+    }
+
+
+    redraw_objects(Widgets.drawing_area);
+    free(maxmin);
+    return True;
+}
+
 
 /**
  * @brief (CALL_BACK) Function called whenever an option in "Croppings"drop-down is sellected.
@@ -1435,9 +2046,39 @@ static void cropping_selection(GtkDropDown *dropdown,
 {
     int dropdown_selected = gtk_drop_down_get_selected(dropdown);
 
-    cropp = (dropdown_selected == 0) ? 0 : 1;
+    if ( dropdown_selected != 0 && array_get_curr_num(arr_points) == 0 )
+    {
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You must draw points to perform clipping.");
+        return;
+    }
+    clock_t t;
+    Bool cntrl;
+
+    switch (dropdown_selected)
+    {
+        case 1: 
+            t = clock();
+            cntrl = cohen_init();
+            t = clock() - t;
+            if ( cntrl ) write_execution_time(t);
+            break;
+        case 2:
+            t = clock();
+            cntrl = liang_barsky_init();
+            t = clock() - t;
+            if ( cntrl ) write_execution_time(t);
+            break;
+        default:
+
+    }
 }   
 
+/**
+ * @brief Used to get User's screen config in order to draw canvas in a bigger size.
+ * 
+ * @param width  Screen's width.
+ * @param height Screen's height.
+*/
 void user_monitor_info(int *width, int *height)
 {
     Display *display = XOpenDisplay(NULL);
@@ -1473,7 +2114,7 @@ static void activate(GtkApplication *app,
     const char *dropdown_content_algorithms[4] = {"Drawing Algorithms\0", "DDA\0", "Bresenham\0"};
     const char *dropdown_content_drawings[5] = {"Objects\0", "Line\0", "Polygon\0", "Circumference\0"};
     const char *dropdown_content_transformations[8] = {"Geometric Transformations\0", "Translate\0", "Rotate\0", "Scale\0", "X Reflection\0", "Y Reflection\0", "XY Reflection\0"};
-    const char *dropdown_content_croppings[5] = {"Cropping Algorithms\0", "Cohen-Sutherland\0", "Liang-Barsky\0", "Clear"};
+    const char *dropdown_content_croppings[4] = {"Cropping Algorithms\0", "Cohen-Sutherland\0", "Liang-Barsky\0"};
 
     int width,
         height;
@@ -1555,6 +2196,7 @@ int main(int    argc,
     arr_lines = array_create(MAX_POINTS);
     arr_polygons = array_create(MAX_POINTS);
     arr_circumferences = array_create(MAX_POINTS);
+    arr_clips = array_create(MAX_POINTS);
 
     app = gtk_application_new("GC.Thiago", G_APPLICATION_FLAGS_NONE);
     g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
