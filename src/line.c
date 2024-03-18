@@ -71,18 +71,17 @@ void line_destroy(struct line *l)
  * @param l       Given line.
  * @param initial Initial clipped point of a line.
  * @param final   Final clipped point of a line.
+ * @param flag    Defines which type of clipping ocurred. 0 = None, 1 = Clipped, 2 = Clipped but not drawn
 */
-void line_add_clipped_points(struct line *l, struct point *c_i, struct point *c_f)
+void line_add_clipped_points(struct line *l, struct point *c_i, struct point *c_f, int flag)
 {
     /* Sanity Check. */
     assert( l != NULL );
+
+    l->was_clipped = flag;
+    l->clipped_initial = c_i;
+    l->clipped_final = c_f;
     
-    if ( c_i != NULL && c_f != NULL )
-    {
-        l->was_clipped = 1;
-        l->clipped_initial = c_i;
-        l->clipped_final = c_f;
-    } else l->was_clipped = 0;
 }
 
 /**

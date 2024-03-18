@@ -55,22 +55,23 @@ polygon_tt polygon_create(struct point **points, int size, int algh)
  * @param pl     Given polygon.
  * @param size   Number of clipped points.
  * @param points Clipped points of a polygon.
+ * @param flag    Defines which type of clipping ocurred. 0 = None, 1 = Clipped, 2 = Clipped but not drawn
 */
-void polygon_add_clipped_points(struct polygon *pl, struct point **points, int size)
+void polygon_add_clipped_points(struct polygon *pl, struct point **points, int size, int flag)
 {
     /* Sanity Check. */
     assert( pl != NULL );
-    assert( points != NULL );
     assert( size < MAX_POINTS );
     
-    if ( size > 0 )
+    pl->was_clipped = flag;
+
+    if ( pl->was_clipped == 1 )
     {
-        pl->was_clipped = 1;
-        for ( int i = 0; i < size; i++ )
+        for ( int i = 0; i < size ; i++ )
         {
-            array_set(pl->clipped_points, i, points[i]);
+            array_set(pl->clipped_points, i + (array_get_curr_num(pl->clipped_points) - 1), points[i++]);
         }
-    } else pl->was_clipped = 0;
+    } 
      
 }
 
