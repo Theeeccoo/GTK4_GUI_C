@@ -1,4 +1,6 @@
 #!/bin/sh
-LIST_OF_APPS = "build-essentials pgk-config lib-gtk4-dev libx11-dev"
 apt-get update # Getting the latest packages
-apt install $LIST_OF_APPS -y # Installing all necessary packages
+apt install build-essential  # Installing all necessary packages
+apt install pkg-config
+apt install libgtk-4-dev
+apt install libx11-dev
