@@ -1008,7 +1008,7 @@ Bool xyreflection()
         for ( int j = 0; j < 2; j++ )
         {
             double new_x = -point_x_coord(points[j]),
-                   new_y = point_y_coord(points[j]);
+                   new_y = -point_y_coord(points[j]);
             point_set_coord(points[j], new_x, new_y);
         }
     }
