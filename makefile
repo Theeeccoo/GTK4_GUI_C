@@ -1,13 +1,3 @@
-# all: contrib src main
-
-
-# contrib: array.c
-# 	gcc -o $@ $< 
-
-# main: main.c 
-# 	gcc -o $@ $< `pkg-config --cflags --libs gtk4` -lm -lX11 -lXrandr
-
-
 # Directories
 SRCDIR = $(CURDIR)/src
 CONTRIBDIR = $(CURDIR)/contrib
@@ -30,8 +20,6 @@ OBJ_CONTRIB = $(CONTRIB_SRC:$(CONTRIBDIR)/%.c=$(BINDIR)/%.o)
 
 # Main Target
 TARGET = main
-
-
 
 # Phony Targets
 .PHONY: all clean
