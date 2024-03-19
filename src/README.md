@@ -130,8 +130,8 @@ Contains five global arrays, which contains all drawn Objects (Points, Lines, Po
     <li>scale(): Pattern: '(X,Y)' - Where X and Y are, both, integer values (positive or negative). Positive values scale up object, negative values scale down object. Iterates through all Object's arrays and apply the specified scale in Pattern in all points (Except for Clip's points). After Scaling, redraw_objects is called;</li>
     <li>rotation(): Pattern: 'Xd' - Where X is integer value (positive or negative) ('d' stands for Degrees). Iterates through all Object's arrays, pins the first point of Object and apply the specified rotation in Pattern in all other points (Except for Clip's points). It implies that Object will rotate around pinned point. After rotation, redraw_objects is called;</li>
     <li>xreflection(): Iterates through all Object's arrays and invert the X value of all Object's points (Except for Clip's points). After XReflecting, redraw_objects is called;</li>
-    <li>yreflection(): Iterates through all Object's arrays and invert the Y value of all Object's points (Except for Clip's points). After XReflecting, redraw_objects is called;</li>
-    <li>xyreflection(): Iterates through all Object's arrays and invert the X and Y value of all Object's points (Except for Clip's points). After XReflecting, redraw_objects is called.</li>
+    <li>yreflection(): Iterates through all Object's arrays and invert the Y value of all Object's points (Except for Clip's points). After YReflecting, redraw_objects is called;</li>
+    <li>xyreflection(): Iterates through all Object's arrays and invert the X and Y value of all Object's points (Except for Clip's points). After XYReflecting, redraw_objects is called.</li>
 </ol>
 
 ### IV) Utils
