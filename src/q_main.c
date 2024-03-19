@@ -1976,58 +1976,6 @@ Bool cohen_init()
     return True;
 }
 
-Bool clear_clipping()
-{
-    if ( array_get_curr_num(arr_clips) == 0 ) 
-    {
-        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: There is no Clip area drawn.");
-        return False;
-    }
-
-    for ( int i = 0; i < array_get_curr_num(arr_clips); i++ )
-    {
-        struct clip *foo = array_get(arr_clips, i);
-        array_tt points = clip_get_points(foo);
-
-        for ( int j = 0; j < array_get_curr_num(points); j++ )
-        {
-            point_destroy(array_get(points, j));
-        }
-        // array_set_curr_num(arr_clips, 0);
-        // // array_destroy(points);
-    }
-    array_destroy(arr_clips);
-    arr_clips = array_create(MAX_POINTS);
-
-    for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
-    {
-        struct line *foo = array_get(arr_lines, i);
-        point_tt *points = line_get_clipped_points(foo);
-
-        for ( int j = 0; j < 2; j++ )
-        {
-            point_destroy(points[j]);
-        }
-        line_add_clipped_points(foo, NULL, NULL, 0);
-    }
-
-    for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
-    {
-        struct polygon *foo = array_get(arr_polygons, i);
-        array_tt points = polygon_get_clipped_points(foo);
-
-        for ( int j = 0; j < array_get_curr_num(points); j++ )
-        {
-            point_destroy(array_get(points, j));
-        }
-        // array_destroy(points);
-        polygon_add_clipped_points(foo, NULL, 0, 0);
-    }
-
-    redraw_objects(Widgets.drawing_area);
-    return True;
-}
-
 /**
  * @brief (CALL_BACK) Function called whenever an option in "Croppings"drop-down is sellected.
  * Defines which image cropping algorithm must be used. Also, when an algorithm is selected, points color should change to represent the cropping area.
@@ -2060,9 +2008,6 @@ static void cropping_selection(GtkDropDown *dropdown,
             cntrl = liang_barsky_init();
             t = clock() - t;
             if ( cntrl ) write_execution_time(t);
-            break;
-        case 3:
-            clear_clipping();
             break;
         default:
 
@@ -2110,7 +2055,7 @@ static void activate(GtkApplication *app,
     const char *dropdown_content_algorithms[4] = {"Drawing Algorithms\0", "DDA\0", "Bresenham\0"};
     const char *dropdown_content_drawings[5] = {"Objects\0", "Line\0", "Polygon\0", "Circumference\0"};
     const char *dropdown_content_transformations[8] = {"Geometric Transformations\0", "Translate\0", "Rotate\0", "Scale\0", "X Reflection\0", "Y Reflection\0", "XY Reflection\0"};
-    const char *dropdown_content_croppings[5] = {"Clipping Algorithms\0", "Cohen-Sutherland\0", "Liang-Barsky\0", "Clear Clipping"};
+    const char *dropdown_content_croppings[5] = {"Clipping Algorithms\0", "Cohen-Sutherland\0", "Liang-Barsky\0"};
 
     int width,
         height;
