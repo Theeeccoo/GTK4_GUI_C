@@ -72,6 +72,10 @@ void polygon_add_clipped_points(struct polygon *pl, struct point **points, int s
             array_set(pl->clipped_points, i + (array_get_curr_num(pl->clipped_points) - 1), points[i++]);
         }
     } 
+    else if ( pl->was_clipped == 0 )
+    {
+        array_set_curr_num(pl->clipped_points, 0);
+    }
      
 }
 

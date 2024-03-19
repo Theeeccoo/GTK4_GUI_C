@@ -385,6 +385,7 @@ static void close_window(void)
     array_destroy(arr_lines);
     array_destroy(arr_polygons);
     array_destroy(arr_circumferences);
+    array_destroy(arr_clips);
     if ( surface ) cairo_surface_destroy(surface);
 }
 
@@ -733,7 +734,7 @@ void redraw_objects(GtkWidget *area)
             // Preventing errors
             p_oposite = polygon_get_clipped_points(pl);
             for ( int j = 0; j < array_get_curr_num(p_oposite); j++ )
-                if ( array_get(p_oposite, j) != NULL ) aux[cont++] = point_id(array_get(p_oposite, j));
+                   if ( array_get(p_oposite, j) != NULL ) aux[cont++] = point_id(array_get(p_oposite, j));
         }
         else if ( polygon_was_clipped(pl) == 1 )
         {
@@ -742,9 +743,9 @@ void redraw_objects(GtkWidget *area)
             // Preventing errors
             p_oposite = polygon_get_points(pl);
             for ( int j = 0; j < array_get_curr_num(p_oposite); j++ ) 
-            {
-                aux[cont++] = point_id(array_get(p_oposite, j));
-            }
+                {
+                    aux[cont++] = point_id(array_get(p_oposite, j));
+                }
         } 
         else if ( polygon_was_clipped(pl) == 2 )
         {
@@ -834,25 +835,27 @@ void redraw_objects(GtkWidget *area)
         DDA(pInit, pFinal, Widgets.drawing_area);
     }
 
+    // TODO talvez não precisa disso, se o ponto tiver não TAKEN, desenha
     // Points
     // Drawing all points that aren't part of an object
-    Bool drawn = False;
+    // Bool drawn = False;
     for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
     {
-        drawn = False;
+        // drawn = False;
         point_tt p = array_get(arr_points, i);
+        if ( p == NULL ) continue;
         int id = point_id(p);
 
-        for ( int j = 0; j < cont; j++ )
-        {   
-            if ( id == aux[j] ) 
-            { 
-                drawn = True;
-                break;
-            }
-        }
+        // for ( int j = 0; j < cont; j++ )
+        // {   
+        //     if ( id == aux[j] ) 
+        //     { 
+        //         drawn = True;
+        //         break;
+        //     }
+        // }
 
-        if ( !drawn ) 
+        if ( !point_is_taken(p) ) 
         {
             draw_brush(Widgets.drawing_area, cr, point_x_coord(p), point_y_coord(p), color_get_colors(point_color(p)));
             draw_text(Widgets.drawing_area, cr, p);
@@ -904,8 +907,6 @@ static void drawings_execution(GtkDropDown *dropdown,
 
 }
 
-
-// TODO Isso vai pra Utils
 char* read_from_until(char *content,
                       char  stop,
                       int  *pos)
@@ -925,53 +926,6 @@ char* read_from_until(char *content,
     }
 
     result[controller] = '\0';
-    return result;
-}
-
-// TODO Isso vai pra Utils ( Tá com erro, tem que arrumar, pro código agora não será utilizado )
-double my_strtod(char* content)
-{
-    double result = 0.0f;
-    int num_size = 0,
-        mantissa_size = 0,
-        iterator = 0,
-        positive = 1;
-
-    if ( content[iterator] == '-' ) { positive = 0; iterator++; } 
-    else if ( content[iterator] == '+') iterator++;
-
-    
-    while ( content[iterator++] != '.' )  
-    {
-        // Making sure that what is read is actually a number.
-        assert(content[iterator] > '0' && content[iterator] < '9');
-        num_size++;
-    }
-
-    while ( iterator != strlen(content) ) 
-    {
-        assert(content[iterator] > '0' && content[iterator] < '9');
-        mantissa_size++;
-    }
-
-    
-    for ( int i = 0; i < num_size ; i++ )
-    {
-        // Since we are sure that everything is a number, we can force a typecasting
-        int curr_value = ((int) content[i]) - '0';
-        double power = pow(10.0f, num_size - i - 1);
-        result += curr_value * power;
-    }
-
-    for ( int i = 0; i < mantissa_size; i++ )
-    {
-        // Since we are sure that everything is a number, we can force a typecasting
-        int curr_value = ((int) content[i]) - '0';
-        double power = pow(10.0f, i + 1);
-        result += curr_value / power;
-    }
-
-    if ( positive == 0 ) result *= -1;
     return result;
 }
 
@@ -1021,12 +975,12 @@ double* check_content(char* content,
         values[2] = -1;
         return values;
     } 
-    // Rotation. Should be informed as: 'X' - Where X is an integer rotation degree value (pos or neg).
+    // Rotation. Should be informed as: 'Xd' - Where X is an integer rotation degree value (pos or neg).
     else if ( transf_id == 2 )
     {
         if ( strlen(content) > 5 )
         {
-            gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: Rotation template is: 'INT'. Please, reformulate your input.");
+            gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: Rotation template is: 'INTd'. Please, reformulate your input.");
             return NULL;
         }
 
@@ -1247,7 +1201,6 @@ Bool rotation(char *content,
 
         point_tt *points = line_get_points(foo);
 
-        // TODO Probably this can be anexed in a new function (V)
         double pinned_x = point_x_coord(points[0]),
                pinned_y = point_y_coord(points[0]);
 
@@ -1531,7 +1484,7 @@ Bool clip_structure()
 
     if ( array_get_curr_num(arr_clips) >= 1 )
     {
-        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You cant have only 1 clip area per time.");
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: You can have only 1 clip area per time.");
         return True;
     }
 
@@ -2034,6 +1987,57 @@ Bool cohen_init()
     return True;
 }
 
+Bool clear_clipping()
+{
+    if ( array_get_curr_num(arr_clips) == 0 ) 
+    {
+        gtk_label_set_label(GTK_LABEL(Widgets.label), "WARNING: There is no Clip area drawn.");
+        return False;
+    }
+
+    for ( int i = 0; i < array_get_curr_num(arr_clips); i++ )
+    {
+        struct clip *foo = array_get(arr_clips, i);
+        array_tt points = clip_get_points(foo);
+
+        for ( int j = 0; j < array_get_curr_num(points); j++ )
+        {
+            point_destroy(array_get(points, j));
+        }
+        // array_set_curr_num(arr_clips, 0);
+        // // array_destroy(points);
+    }
+    array_destroy(arr_clips);
+    arr_clips = array_create(MAX_POINTS);
+
+    for ( int i = 0; i < array_get_curr_num(arr_lines); i++ )
+    {
+        struct line *foo = array_get(arr_lines, i);
+        point_tt *points = line_get_clipped_points(foo);
+
+        for ( int j = 0; j < 2; j++ )
+        {
+            point_destroy(points[j]);
+        }
+        line_add_clipped_points(foo, NULL, NULL, 0);
+    }
+
+    for ( int i = 0; i < array_get_curr_num(arr_polygons); i++ )
+    {
+        struct polygon *foo = array_get(arr_polygons, i);
+        array_tt points = polygon_get_clipped_points(foo);
+
+        for ( int j = 0; j < array_get_curr_num(points); j++ )
+        {
+            point_destroy(array_get(points, j));
+        }
+        // array_destroy(points);
+        polygon_add_clipped_points(foo, NULL, 0, 0);
+    }
+
+    redraw_objects(Widgets.drawing_area);
+    return True;
+}
 
 /**
  * @brief (CALL_BACK) Function called whenever an option in "Croppings"drop-down is sellected.
@@ -2067,6 +2071,9 @@ static void cropping_selection(GtkDropDown *dropdown,
             cntrl = liang_barsky_init();
             t = clock() - t;
             if ( cntrl ) write_execution_time(t);
+            break;
+        case 3:
+            clear_clipping();
             break;
         default:
 
@@ -2114,7 +2121,7 @@ static void activate(GtkApplication *app,
     const char *dropdown_content_algorithms[4] = {"Drawing Algorithms\0", "DDA\0", "Bresenham\0"};
     const char *dropdown_content_drawings[5] = {"Objects\0", "Line\0", "Polygon\0", "Circumference\0"};
     const char *dropdown_content_transformations[8] = {"Geometric Transformations\0", "Translate\0", "Rotate\0", "Scale\0", "X Reflection\0", "Y Reflection\0", "XY Reflection\0"};
-    const char *dropdown_content_croppings[4] = {"Cropping Algorithms\0", "Cohen-Sutherland\0", "Liang-Barsky\0"};
+    const char *dropdown_content_croppings[5] = {"Clipping Algorithms\0", "Cohen-Sutherland\0", "Liang-Barsky\0", "Clear Clipping"};
 
     int width,
         height;

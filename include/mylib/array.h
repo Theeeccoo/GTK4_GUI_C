@@ -42,6 +42,7 @@
 	extern void      array_set(array_tt, int, const void *);
 	extern void     *array_get(const_array_tt, int);
 	extern int       array_get_curr_num(const_array_tt);
+	extern void      array_set_curr_num(array_tt, int);
 	/**@}*/
 
 #endif /* ARRAY_H_ */

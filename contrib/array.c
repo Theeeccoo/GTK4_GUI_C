@@ -130,3 +130,16 @@ int array_get_curr_num(const struct array *a)
 
     return (a->curr_num);
 }
+
+/**
+ * @brief Sets the number of filled elements.
+ *
+ * @param a     Target array.
+ * @param value New value
+ */
+void array_set_curr_num(struct array *a, int value)
+{
+    /* Sanity check. */
+	assert(a != NULL);
+	a->curr_num = value;
+}
