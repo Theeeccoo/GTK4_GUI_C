@@ -835,25 +835,14 @@ void redraw_objects(GtkWidget *area)
         DDA(pInit, pFinal, Widgets.drawing_area);
     }
 
-    // TODO talvez não precisa disso, se o ponto tiver não TAKEN, desenha
     // Points
     // Drawing all points that aren't part of an object
-    // Bool drawn = False;
     for ( int i = 0; i < array_get_curr_num(arr_points); i++ )
     {
         // drawn = False;
         point_tt p = array_get(arr_points, i);
         if ( p == NULL ) continue;
         int id = point_id(p);
-
-        // for ( int j = 0; j < cont; j++ )
-        // {   
-        //     if ( id == aux[j] ) 
-        //     { 
-        //         drawn = True;
-        //         break;
-        //     }
-        // }
 
         if ( !point_is_taken(p) ) 
         {
